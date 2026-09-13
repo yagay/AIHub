@@ -1,15 +1,17 @@
 package com.yagay.aihub.app;
 
-import android.app.Activity;
 import android.graphics.Insets;
 import android.os.Bundle;
 import android.view.WindowInsets;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
+
 import com.yagay.aihub.android.AiHubUiCoordinator;
 
-public final class MainActivity extends Activity {
+public final class MainActivity extends ComponentActivity {
     private WebViewBrowserHost browserHost;
     private AiHubUiCoordinator coordinator;
 
@@ -26,21 +28,25 @@ public final class MainActivity extends Activity {
         });
         setContentView(root);
 
-        boolean debuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        boolean debuggable = (getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
         WebView.setWebContentsDebuggingEnabled(debuggable);
 
         browserHost = new WebViewBrowserHost(this, root);
         coordinator = AiHubUiCoordinator.attachConfigured(browserHost);
-    }
 
-    @Override
-    @Deprecated
-    public void onBackPressed() {
-        if (browserHost != null && browserHost.canGoBack()) {
-            browserHost.back();
-        } else {
-            super.onBackPressed();
-        }
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (browserHost != null && browserHost.canGoBack()) {
+                    browserHost.back();
+                    return;
+                }
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+                setEnabled(true);
+            }
+        });
     }
 
     @Override
