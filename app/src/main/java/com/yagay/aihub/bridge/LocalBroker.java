@@ -46,7 +46,7 @@ public final class LocalBroker implements Closeable {
     public static final int PORT = 3847;
     private static final String UI_ORIGIN = "https://appassets.androidplatform.net";
     private static final int MAX_HTTP_BODY = 2 * 1024 * 1024;
-    private static final int MAX_WS_FRAME = 2 * 1024 * 1024;
+    private static final int MAX_WS_MESSAGE = 2 * 1024 * 1024;
 
     private static final Map<String, String> MODEL_TO_PROVIDER = new LinkedHashMap<>();
     static {
@@ -105,7 +105,9 @@ public final class LocalBroker implements Closeable {
                 return;
             }
 
-            try (Socket ignored = socket; BufferedInputStream ignoredIn = in; BufferedOutputStream ignoredOut = out) {
+            try (Socket ignored = socket;
+                 BufferedInputStream ignoredIn = in;
+                 BufferedOutputStream ignoredOut = out) {
                 handleHttp(out, request);
             }
         } catch (Exception ignored) {
@@ -154,7 +156,7 @@ public final class LocalBroker implements Closeable {
     }
 
     private static boolean isUiOriginAllowed(String origin) {
-        return origin == null || origin.isEmpty() || UI_ORIGIN.equals(origin);
+        return UI_ORIGIN.equals(origin);
     }
 
     private void chat(OutputStream out, JSONObject body, String origin) throws Exception {
@@ -230,7 +232,8 @@ public final class LocalBroker implements Closeable {
         }
     }
 
-    private void handleWebSocket(Socket socket, BufferedInputStream in, BufferedOutputStream out, Request request) throws Exception {
+    private void handleWebSocket(Socket socket, BufferedInputStream in, BufferedOutputStream out,
+                                 Request request) throws Exception {
         String origin = request.headers.get("origin");
         if (origin == null || !origin.startsWith("chrome-extension://")) {
             write(out, 403, "text/plain", "Forbidden", null);
@@ -239,7 +242,7 @@ public final class LocalBroker implements Closeable {
         }
 
         String key = request.headers.get("sec-websocket-key");
-        if (key == null || key.isBlank()) {
+        if (key == null || key.trim().isEmpty()) {
             write(out, 400, "text/plain", "Missing WebSocket key", null);
             socket.close();
             return;
@@ -257,6 +260,8 @@ public final class LocalBroker implements Closeable {
         synchronized (lock) { clients.add(client); }
         client.sendJson(new JSONObject().put("type", "ready").put("protocol", 1));
 
+        ByteArrayOutputStream fragmented = null;
+        int fragmentedOpcode = -1;
         try {
             while (running && !socket.isClosed()) {
                 WsFrame frame = readFrame(in);
@@ -265,8 +270,36 @@ public final class LocalBroker implements Closeable {
                     client.sendFrame(0xA, frame.payload);
                     continue;
                 }
-                if (frame.opcode != 0x1) continue;
-                processWebSocketMessage(client, new String(frame.payload, StandardCharsets.UTF_8));
+                if (frame.opcode == 0xA) continue;
+
+                if (frame.opcode == 0x1 || frame.opcode == 0x2) {
+                    if (frame.fin) {
+                        if (frame.opcode == 0x1) {
+                            processWebSocketMessage(client,
+                                    new String(frame.payload, StandardCharsets.UTF_8));
+                        }
+                    } else {
+                        fragmented = new ByteArrayOutputStream();
+                        fragmented.write(frame.payload);
+                        fragmentedOpcode = frame.opcode;
+                    }
+                    continue;
+                }
+
+                if (frame.opcode == 0x0 && fragmented != null) {
+                    if (fragmented.size() + frame.payload.length > MAX_WS_MESSAGE) {
+                        throw new IllegalArgumentException("WebSocket message too large");
+                    }
+                    fragmented.write(frame.payload);
+                    if (frame.fin) {
+                        if (fragmentedOpcode == 0x1) {
+                            processWebSocketMessage(client,
+                                    new String(fragmented.toByteArray(), StandardCharsets.UTF_8));
+                        }
+                        fragmented = null;
+                        fragmentedOpcode = -1;
+                    }
+                }
             }
         } finally {
             onClientClosed(client);
@@ -302,7 +335,8 @@ public final class LocalBroker implements Closeable {
                     future = pending.get(id);
                 }
                 if (future != null) {
-                    future.complete(new Result(message.optString("response", ""), message.optString("error", "")));
+                    future.complete(new Result(message.optString("response", ""),
+                            message.optString("error", "")));
                 }
                 return;
             }
@@ -389,7 +423,7 @@ public final class LocalBroker implements Closeable {
 
     private static Request readRequest(InputStream in) throws Exception {
         String first = readLine(in);
-        if (first == null || first.isBlank()) return null;
+        if (first == null || first.trim().isEmpty()) return null;
         String[] parts = first.split(" ", 3);
         if (parts.length < 2) return null;
 
@@ -404,7 +438,9 @@ public final class LocalBroker implements Closeable {
             headers.put(name, value);
             if ("content-length".equals(name)) length = Integer.parseInt(value);
         }
-        if (length < 0 || length > MAX_HTTP_BODY) throw new IllegalArgumentException("HTTP body too large");
+        if (length < 0 || length > MAX_HTTP_BODY) {
+            throw new IllegalArgumentException("HTTP body too large");
+        }
 
         byte[] body = readExact(in, length);
         URI uri = URI.create(parts[1]);
@@ -418,10 +454,12 @@ public final class LocalBroker implements Closeable {
         while ((b = in.read()) >= 0) {
             if (b == '\n') break;
             if (b != '\r') out.write(b);
-            if (out.size() > 16 * 1024) throw new IllegalArgumentException("HTTP header line too large");
+            if (out.size() > 16 * 1024) {
+                throw new IllegalArgumentException("HTTP header line too large");
+            }
         }
         if (b < 0 && out.size() == 0) return null;
-        return out.toString(StandardCharsets.UTF_8);
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private static byte[] readExact(InputStream in, int length) throws Exception {
@@ -447,6 +485,7 @@ public final class LocalBroker implements Closeable {
         if (b0 < 0) return null;
         int b1 = in.read();
         if (b1 < 0) throw new EOFException();
+        boolean fin = (b0 & 0x80) != 0;
         int opcode = b0 & 0x0F;
         boolean masked = (b1 & 0x80) != 0;
         long length = b1 & 0x7F;
@@ -457,20 +496,24 @@ public final class LocalBroker implements Closeable {
             byte[] ext = readExact(in, 8);
             length = ByteBuffer.wrap(ext).getLong();
         }
-        if (length < 0 || length > MAX_WS_FRAME) throw new IllegalArgumentException("WebSocket frame too large");
+        if (length < 0 || length > MAX_WS_MESSAGE) {
+            throw new IllegalArgumentException("WebSocket frame too large");
+        }
         byte[] mask = masked ? readExact(in, 4) : null;
         byte[] payload = readExact(in, (int) length);
         if (mask != null) {
             for (int i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
         }
-        return new WsFrame(opcode, payload);
+        return new WsFrame(fin, opcode, payload);
     }
 
-    private static void writeJson(OutputStream out, int status, JSONObject json, String origin) throws Exception {
+    private static void writeJson(OutputStream out, int status, JSONObject json,
+                                  String origin) throws Exception {
         write(out, status, "application/json; charset=utf-8", json.toString(), origin);
     }
 
-    private static void write(OutputStream out, int status, String type, String body, String origin) throws Exception {
+    private static void write(OutputStream out, int status, String type, String body,
+                              String origin) throws Exception {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         String reason = status == 200 ? "OK"
                 : status == 204 ? "No Content"
@@ -531,7 +574,8 @@ public final class LocalBroker implements Closeable {
 
         boolean isWebSocketUpgrade() {
             return "websocket".equalsIgnoreCase(headers.get("upgrade"))
-                    && headers.getOrDefault("connection", "").toLowerCase(Locale.ROOT).contains("upgrade");
+                    && headers.getOrDefault("connection", "")
+                    .toLowerCase(Locale.ROOT).contains("upgrade");
         }
     }
 
@@ -563,9 +607,11 @@ public final class LocalBroker implements Closeable {
     }
 
     private static final class WsFrame {
+        final boolean fin;
         final int opcode;
         final byte[] payload;
-        WsFrame(int opcode, byte[] payload) {
+        WsFrame(boolean fin, int opcode, byte[] payload) {
+            this.fin = fin;
             this.opcode = opcode;
             this.payload = payload;
         }
