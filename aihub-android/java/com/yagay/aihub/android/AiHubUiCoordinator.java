@@ -2,6 +2,8 @@ package com.yagay.aihub.android;
 
 import android.app.AlertDialog;
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,6 +26,7 @@ import java.util.Map;
 /** AI-first Android shell drawn over a browser host. */
 public final class AiHubUiCoordinator {
     private static final String ROOT_TAG = "AIHUB_OVERLAY_ROOT";
+    private static final long APP_MODE_REFRESH_MS = 2500L;
 
     private final AiHubBrowserHost host;
     private final ProviderRegistry providers;
@@ -31,12 +34,16 @@ public final class AiHubUiCoordinator {
     private final BrowserSessionRuntime runtime;
     private final SessionManager sessions;
     private final Map<String, Button> providerButtons = new LinkedHashMap<>();
+    private final Handler mainHandler;
+    private final Runnable appModeRefresh;
 
     private FrameLayout overlay;
     private LinearLayout providerRail;
     private TextView currentProvider;
     private EditText composer;
+    private Button modeButton;
     private boolean browserControlsVisible;
+    private boolean appModeEnabled;
 
     private AiHubUiCoordinator(
             AiHubBrowserHost host,
@@ -47,6 +54,16 @@ public final class AiHubUiCoordinator {
         this.stateStore = stateStore;
         this.runtime = new BrowserSessionRuntime(host);
         this.sessions = new SessionManager(providers, runtime);
+        this.appModeEnabled = stateStore.appModeEnabled();
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.appModeRefresh = new Runnable() {
+            @Override
+            public void run() {
+                if (overlay == null) return;
+                applyAppMode();
+                mainHandler.postDelayed(this, APP_MODE_REFRESH_MS);
+            }
+        };
     }
 
     /** Normal entry: packaged JSON rules + custom providers + signed overrides. */
@@ -86,10 +103,15 @@ public final class AiHubUiCoordinator {
     }
 
     public void destroy() {
+        mainHandler.removeCallbacks(appModeRefresh);
+        if (sessions.currentOrNull() != null) {
+            runtime.setAppMode(sessions.currentKey(), false);
+        }
         runtime.shutdown();
         if (overlay != null && overlay.getParent() instanceof ViewGroup parent) {
             parent.removeView(overlay);
         }
+        overlay = null;
         showBrowserControls(true);
     }
 
@@ -114,6 +136,7 @@ public final class AiHubUiCoordinator {
             String saved = stateStore.savedProviderId();
             activate(saved != null && providers.contains(saved) ? saved : providers.all().get(0).id());
         }
+        mainHandler.post(appModeRefresh);
     }
 
     private void buildTopBar() {
@@ -134,6 +157,10 @@ public final class AiHubUiCoordinator {
         currentProvider.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         currentProvider.setTextSize(16);
         nav.addView(currentProvider, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        modeButton = button(appModeEnabled ? "APP" : "WEB", ignored -> toggleAppMode());
+        modeButton.setAllCaps(false);
+        nav.addView(modeButton, new LinearLayout.LayoutParams(dp(62), dp(42)));
 
         nav.addView(button("＋", ignored -> sessions.newChat()));
         if (host.chromeControlContainer() != null) {
@@ -266,6 +293,27 @@ public final class AiHubUiCoordinator {
                     Typeface.DEFAULT,
                     entry.getKey().equals(providerId) ? Typeface.BOLD : Typeface.NORMAL);
         }
+        mainHandler.postDelayed(this::applyAppMode, 150L);
+    }
+
+    private void toggleAppMode() {
+        appModeEnabled = !appModeEnabled;
+        stateStore.saveAppModeEnabled(appModeEnabled);
+        updateModeButton();
+        applyAppMode();
+    }
+
+    private void updateModeButton() {
+        if (modeButton == null) return;
+        modeButton.setText(appModeEnabled ? "APP" : "WEB");
+        modeButton.setSelected(appModeEnabled);
+        modeButton.setTypeface(Typeface.DEFAULT, appModeEnabled ? Typeface.BOLD : Typeface.NORMAL);
+    }
+
+    private void applyAppMode() {
+        if (sessions.currentOrNull() == null) return;
+        runtime.setAppMode(sessions.currentKey(), appModeEnabled);
+        updateModeButton();
     }
 
     private void sendComposer() {
