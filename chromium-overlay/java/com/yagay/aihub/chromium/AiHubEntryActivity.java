@@ -12,8 +12,8 @@ import com.yagay.aihub.R;
 import com.yagay.aihub.core.command.AiCommand;
 
 /**
- * The only exported Activity. It validates private automation requests and requires explicit user
- * confirmation for ordinary Android shares before forwarding them to the unexported shell.
+ * The only exported Activity. Private automation is token-gated; ordinary shares and deep links
+ * require explicit user confirmation before they can reach the unexported shell.
  */
 public final class AiHubEntryActivity extends AppCompatActivity {
     public static final String EXTRA_INTERNAL_DISPATCH = "com.yagay.aihub.internal.DISPATCH";
@@ -55,24 +55,38 @@ public final class AiHubEntryActivity extends AppCompatActivity {
                 deny();
                 return;
             }
-            confirmationDialog = new AlertDialog.Builder(this)
-                    .setTitle(R.string.share_confirm_title)
-                    .setMessage(R.string.share_confirm_message)
-                    .setNegativeButton(android.R.string.cancel, (dialog, which) -> finish())
-                    .setOnCancelListener(dialog -> finish())
-                    .setPositiveButton(android.R.string.ok, (dialog, which) -> forwardToShell(source))
-                    .create();
-            confirmationDialog.show();
+            confirmAndForward(source, R.string.share_confirm_title, R.string.share_confirm_message);
             return;
         }
 
-        // Private Intent actions and deep links must already carry the local client token.
+        if (Intent.ACTION_VIEW.equals(action)) {
+            AiCommand command = AiHubExternalCommandParser.parse(source, stateStore.clientToken());
+            if (command == null) {
+                deny();
+                return;
+            }
+            confirmAndForward(source, R.string.link_confirm_title, R.string.link_confirm_message);
+            return;
+        }
+
+        // Unattended custom Intent actions must carry the local client token in an Intent extra.
         AiCommand command = AiHubExternalCommandParser.parse(source, stateStore.clientToken());
         if (command == null) {
             deny();
             return;
         }
         forwardToShell(source);
+    }
+
+    private void confirmAndForward(Intent source, int title, int message) {
+        confirmationDialog = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) -> finish())
+                .setOnCancelListener(dialog -> finish())
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> forwardToShell(source))
+                .create();
+        confirmationDialog.show();
     }
 
     private void forwardToShell(@Nullable Intent source) {
