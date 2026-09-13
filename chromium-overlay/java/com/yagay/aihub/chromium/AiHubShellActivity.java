@@ -4,6 +4,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
@@ -26,6 +27,7 @@ import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.CommandResult;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +35,8 @@ import java.util.UUID;
 
 /** Unified AI shell: every provider/account/action shares one SessionManager/AiCommandBus path. */
 public final class AiHubShellActivity extends AppCompatActivity {
+    private static final int REQUEST_ATTACHMENTS = 4107;
+
     private AiHubStateStore stateStore;
     private AiHubBootstrap.Graph graph;
     private WebEngineSessionRuntime runtime;
@@ -61,6 +65,14 @@ public final class AiHubShellActivity extends AppCompatActivity {
         handleExternalIntent(intent);
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_ATTACHMENTS || resultCode != RESULT_OK || data == null) return;
+        List<String> uris = collectSelectedUris(data);
+        if (!uris.isEmpty()) graph.sessions.attach(uris);
+    }
+
     private void bindViews() {
         providerButton = findViewById(R.id.provider_button);
         accountButton = findViewById(R.id.account_button);
@@ -75,7 +87,7 @@ public final class AiHubShellActivity extends AppCompatActivity {
         accountButton.setOnClickListener(v -> showAccountPicker());
         workspaceButton.setOnClickListener(v -> showWorkspacePicker());
         findViewById(R.id.new_chat_button).setOnClickListener(v -> graph.sessions.newChat());
-        findViewById(R.id.attach_button).setOnClickListener(v -> graph.sessions.attach(List.of()));
+        findViewById(R.id.attach_button).setOnClickListener(v -> openAttachmentPicker());
         findViewById(R.id.stop_button).setOnClickListener(v -> graph.sessions.stop());
         findViewById(R.id.send_button).setOnClickListener(v -> sendComposer());
         findViewById(R.id.menu_button).setOnClickListener(v -> showToolsMenu());
@@ -89,6 +101,35 @@ public final class AiHubShellActivity extends AppCompatActivity {
             sendComposer();
             return true;
         });
+    }
+
+    private void openAttachmentPicker() {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(picker, REQUEST_ATTACHMENTS);
+    }
+
+    private List<String> collectSelectedUris(Intent data) {
+        List<String> out = new ArrayList<>();
+        ClipData clip = data.getClipData();
+        if (clip != null) {
+            for (int i = 0; i < clip.getItemCount(); i++) addSelectedUri(out, clip.getItemAt(i).getUri());
+        }
+        addSelectedUri(out, data.getData());
+        return out;
+    }
+
+    private void addSelectedUri(List<String> out, Uri uri) {
+        if (uri == null || out.contains(uri.toString())) return;
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) {
+            // Some document providers grant only temporary read access; upload starts immediately.
+        }
+        out.add(uri.toString());
     }
 
     private void activateInitialSession() {
