@@ -6,7 +6,6 @@ import android.os.IBinder;
 
 import com.yagay.aihub.api.AiHubContract;
 import com.yagay.aihub.api.IAiHubService;
-import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.provider.ProviderRegistry;
 
@@ -18,7 +17,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Token-gated Binder facade. Browser mutations are routed through the secure external entry. */
+/** Token-gated Binder facade. Browser mutations are routed through the guarded entry Activity. */
 public final class AiHubBinderService extends Service {
     private AiHubStateStore stateStore;
 
@@ -32,7 +31,7 @@ public final class AiHubBinderService extends Service {
         @Override
         public String listProvidersJson(String clientToken) {
             if (!authorized(clientToken)) return "[]";
-            ProviderRegistry registry = new ProviderRuleLoader(AiHubBinderService.this).load();
+            ProviderRegistry registry = new ProviderRuleLoader(AiHubBinderService.this, stateStore).load();
             JSONArray array = new JSONArray();
             for (ProviderConfig provider : registry.all()) {
                 JSONObject item = new JSONObject();
@@ -50,40 +49,23 @@ public final class AiHubBinderService extends Service {
         }
 
         @Override
-        public String listAccountsJson(String clientToken, String providerId) {
-            if (!authorized(clientToken)) return "[]";
-            JSONArray array = new JSONArray();
-            for (AiAccount account : stateStore.loadAccounts()) {
-                if (providerId != null && !providerId.isBlank() && !providerId.equals(account.providerId())) continue;
-                JSONObject item = new JSONObject();
-                try {
-                    item.put("id", account.id());
-                    item.put("providerId", account.providerId());
-                    item.put("label", account.label());
-                    array.put(item);
-                } catch (Exception ignored) {}
-            }
-            return array.toString();
-        }
-
-        @Override
         public String getCurrentSessionJson(String clientToken) {
             if (!authorized(clientToken)) return "{}";
             JSONObject object = new JSONObject();
             try {
                 object.put("providerId", stateStore.savedProviderId());
-                object.put("accountId", stateStore.savedAccountId());
-                object.put("workspaceId", stateStore.savedWorkspaceId());
             } catch (Exception ignored) {}
             return object.toString();
         }
 
-        @Override public boolean switchSession(String token, String provider, String account, String workspace) {
-            return start(token, AiHubContract.ACTION_SWITCH, provider, account, workspace, null, null);
+        @Override public boolean switchProvider(String token, String provider) {
+            return start(token, AiHubContract.ACTION_SWITCH, provider, null, null);
         }
-        @Override public boolean sendText(String token, String provider, String account, String workspace, String text) {
-            return start(token, AiHubContract.ACTION_SEND_TEXT, provider, account, workspace, text, null);
+
+        @Override public boolean sendText(String token, String provider, String text) {
+            return start(token, AiHubContract.ACTION_SEND_TEXT, provider, text, null);
         }
+
         @Override public boolean newChat(String token) { return startSimple(token, AiHubContract.ACTION_NEW_CHAT); }
         @Override public boolean stop(String token) { return startSimple(token, AiHubContract.ACTION_STOP); }
         @Override public boolean back(String token) { return startSimple(token, AiHubContract.ACTION_BACK); }
@@ -94,13 +76,13 @@ public final class AiHubBinderService extends Service {
 
         @Override
         public boolean attach(String token, List<String> uriStrings) {
-            return start(token, AiHubContract.ACTION_ATTACH, null, null, null, null,
+            return start(token, AiHubContract.ACTION_ATTACH, null, null,
                     uriStrings == null ? List.of() : uriStrings);
         }
 
         @Override
         public boolean attachAndSend(String token, List<String> uriStrings, String text) {
-            return start(token, AiHubContract.ACTION_ATTACH, null, null, null, text,
+            return start(token, AiHubContract.ACTION_ATTACH, null, text,
                     uriStrings == null ? List.of() : uriStrings);
         }
     };
@@ -109,15 +91,13 @@ public final class AiHubBinderService extends Service {
     public IBinder onBind(Intent intent) { return binder; }
 
     private boolean startSimple(String token, String action) {
-        return start(token, action, null, null, null, null, null);
+        return start(token, action, null, null, null);
     }
 
     private boolean start(
             String token,
             String action,
             String provider,
-            String account,
-            String workspace,
             String text,
             List<String> uris) {
         if (!authorized(token)) return false;
@@ -126,8 +106,6 @@ public final class AiHubBinderService extends Service {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(AiHubContract.EXTRA_CLIENT_TOKEN, token);
         if (provider != null) intent.putExtra(AiHubContract.EXTRA_PROVIDER_ID, provider);
-        if (account != null) intent.putExtra(AiHubContract.EXTRA_ACCOUNT_ID, account);
-        if (workspace != null) intent.putExtra(AiHubContract.EXTRA_WORKSPACE_ID, workspace);
         if (text != null) intent.putExtra(AiHubContract.EXTRA_TEXT, text);
         if (uris != null) intent.putStringArrayListExtra(AiHubContract.EXTRA_URI_LIST, new ArrayList<>(uris));
         try {
