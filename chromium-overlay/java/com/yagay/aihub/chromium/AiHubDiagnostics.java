@@ -2,9 +2,7 @@ package com.yagay.aihub.chromium;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.AiSessionKey;
-import com.yagay.aihub.core.AiWorkspace;
 import com.yagay.aihub.core.ProviderConfig;
 
 import org.json.JSONArray;
@@ -34,10 +32,8 @@ public final class AiHubDiagnostics {
             String probeJson) {
         JSONObject root = new JSONObject();
         try {
-            root.put("format", "aihub-diagnostics-v1");
+            root.put("format", "aihub-diagnostics-v2");
             root.put("providerId", key.providerId());
-            root.put("accountId", key.accountId());
-            root.put("workspaceId", graph.sessions.activeWorkspaceId());
             root.put("currentUrl", currentUrl == null ? "" : currentUrl);
             try {
                 root.put("pageProbe", probeJson == null ? JSONObject.NULL : new JSONObject(probeJson));
@@ -62,32 +58,11 @@ public final class AiHubDiagnostics {
             }
             root.put("providers", providers);
 
-            JSONArray accounts = new JSONArray();
-            for (AiAccount account : graph.accounts.all()) {
-                JSONObject item = new JSONObject();
-                item.put("id", account.id());
-                item.put("providerId", account.providerId());
-                item.put("label", account.label());
-                item.put("profileName", account.profileName());
-                accounts.put(item);
-            }
-            root.put("accounts", accounts);
-
-            JSONArray workspaces = new JSONArray();
-            for (AiWorkspace workspace : graph.workspaces.all()) {
-                JSONObject item = new JSONObject();
-                item.put("id", workspace.id());
-                item.put("label", workspace.label());
-                item.put("providerAccounts", new JSONObject(workspace.providerAccounts()));
-                workspaces.put(item);
-            }
-            root.put("workspaces", workspaces);
-
             JSONArray warnings = new JSONArray();
             graph.providerWarnings.forEach(warnings::put);
             root.put("providerWarnings", warnings);
         } catch (Exception error) {
-            return "{\"format\":\"aihub-diagnostics-v1\",\"error\":\""
+            return "{\"format\":\"aihub-diagnostics-v2\",\"error\":\""
                     + escape(error.toString()) + "\"}";
         }
         return root.toString(2);
