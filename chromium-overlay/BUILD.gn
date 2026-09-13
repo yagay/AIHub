@@ -1,0 +1,67 @@
+# AIHub overlay target for a Chromium checkout.
+# Copy this repository to //aihub in Chromium, then build //aihub/chromium-overlay:aihub_apk.
+
+import("//build/config/android/rules.gni")
+
+android_resources("aihub_resources") {
+  sources = [
+    "res/layout/aihub_activity_main.xml",
+    "res/values/strings.xml",
+    "res/values/styles.xml",
+  ]
+}
+
+android_library("aihub_core_java") {
+  sources = [
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AccountRegistry.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AiAccount.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AiCapability.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AiSession.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AiSessionKey.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/AiWorkspace.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/ProviderConfig.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/SessionManager.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/SessionState.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/WorkspaceRegistry.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommand.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandBus.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandType.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/command/CommandResult.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/provider/BuiltinProviders.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/provider/ProviderRegistry.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/runtime/SessionRuntime.java",
+    "../android-api/src/main/java/com/yagay/aihub/api/AiHubContract.java",
+  ]
+}
+
+android_library("aihub_java") {
+  resources_package = "com.yagay.aihub"
+  sources = [
+    "java/com/yagay/aihub/chromium/AiHubBootstrap.java",
+    "java/com/yagay/aihub/chromium/AiHubExternalCommandParser.java",
+    "java/com/yagay/aihub/chromium/AiHubShellActivity.java",
+    "java/com/yagay/aihub/chromium/AiHubStateStore.java",
+    "java/com/yagay/aihub/chromium/AiWebEngineHost.java",
+    "java/com/yagay/aihub/chromium/GenericDomScriptFactory.java",
+    "java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
+  ]
+  deps = [
+    ":aihub_core_java",
+    ":aihub_resources",
+    "//third_party/android_deps:com_google_guava_listenablefuture_java",
+    "//third_party/android_deps:guava_android_java",
+    "//third_party/androidx:androidx_appcompat_appcompat_java",
+    "//third_party/androidx:androidx_fragment_fragment_java",
+    "//weblayer/public/java:service_provider_java",
+    "//weblayer/public/java:webengine_java",
+    "//weblayer/shell/android:webengine_service_provider_resources",
+  ]
+}
+
+android_apk("aihub_apk") {
+  apk_name = "AIHub"
+  android_manifest = "AndroidManifest.xml"
+  min_sdk_version = 31
+  target_sdk_version = 37
+  deps = [ ":aihub_java" ]
+}
