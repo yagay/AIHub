@@ -34,6 +34,7 @@ def patch_access(text: str) -> str:
         'useCustomConfig: false,': 'useCustomConfig: true,',
         'openaiUrl: DEFAULT_OPENAI_URL,': 'openaiUrl: "http://127.0.0.1:3456",',
         'needCode: true,': 'needCode: false,',
+        'hideUserApiKey: false,': 'hideUserApiKey: true,',
     }
     for old, new in replacements.items():
         if old not in text:
@@ -53,6 +54,31 @@ def patch_openai(text: str) -> str:
     if old not in text:
         raise SystemExit("NextChat OpenAI model filter marker changed")
     return text.replace(old, new, 1)
+
+
+def patch_settings(text: str) -> str:
+    import_marker = 'import { ModelConfigList } from "./model-config";'
+    if import_marker not in text:
+        raise SystemExit("NextChat settings import marker changed")
+    text = text.replace(
+        import_marker,
+        import_marker + '\nimport { AIHubGatewaySettings } from "./aihub-gateway-settings";',
+        1,
+    )
+
+    list_marker = '<List id={SlotID.CustomModel}>'
+    if list_marker not in text:
+        raise SystemExit("NextChat settings custom-model marker changed")
+    text = text.replace(
+        list_marker,
+        list_marker + '\n          <AIHubGatewaySettings />',
+        1,
+    )
+
+    # The mobile build uses browser sessions only; remove API/SaaS onboarding from this section.
+    text = text.replace('          {saasStartComponent}\n', '', 1)
+    text = text.replace('          {accessCodeComponent}\n', '', 1)
+    return text
 
 
 def patch_next_config(text: str) -> str:
@@ -98,6 +124,7 @@ def disable_server_mcp() -> None:
 edit("app/store/config.ts", patch_config)
 edit("app/store/access.ts", patch_access)
 edit("app/client/platforms/openai.ts", patch_openai)
+edit("app/components/settings.tsx", patch_settings)
 edit("next.config.mjs", patch_next_config)
 disable_server_mcp()
 print("Patched NextChat for AIHub local OpenAI-compatible browser gateway")
