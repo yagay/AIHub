@@ -41,6 +41,23 @@ public final class GenericDomScriptFactory {
             """;
     }
 
+    /** Fallback used for URI-based Android shares; normal in-app attachment uses Chromium chooser. */
+    public static String uploadInit(int fileCount) {
+        return "window.__aihubUpload={files:Array.from({length:%d},()=>({name:'',type:'',b64:''}))};'ok'".formatted(fileCount);
+    }
+
+    public static String uploadAppend(int index, String name, String mime, String base64Chunk) {
+        return """
+            (()=>{const u=window.__aihubUpload;if(!u||!u.files[%d])return 'missing';const f=u.files[%d];if(!f.name)f.name=%s;if(!f.type)f.type=%s;f.b64+=%s;return String(f.b64.length);})()
+            """.formatted(index, index, jsString(name), jsString(mime), jsString(base64Chunk));
+    }
+
+    public static String uploadCommit() {
+        return """
+            (()=>{try{const u=window.__aihubUpload;if(!u)return JSON.stringify({ok:false,stage:'buffer'});const input=[...document.querySelectorAll('input[type="file"]')].find(el=>!el.disabled);if(!input)return JSON.stringify({ok:false,stage:'file-input'});const dt=new DataTransfer();for(const rec of u.files){const bin=atob(rec.b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);dt.items.add(new File([bytes],rec.name||'upload.bin',{type:rec.type||'application/octet-stream'}));}input.files=dt.files;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));delete window.__aihubUpload;return JSON.stringify({ok:true,count:dt.files.length});}catch(e){delete window.__aihubUpload;return JSON.stringify({ok:false,stage:'commit',error:String(e)});}})()
+            """;
+    }
+
     public static String probe(ProviderConfig provider) {
         return """
             (()=>{const inputFallbacks=%s,sendFallbacks=%s,newChatFallbacks=%s,stopFallbacks=%s;const visible=el=>!!el&&!el.disabled&&!!(el.offsetWidth||el.offsetHeight||el.getClientRects().length);const any=s=>s.some(x=>{try{return visible(document.querySelector(x));}catch(_){return false;}});const semantic=words=>[...document.querySelectorAll('button,[role="button"],a')].some(el=>{if(!visible(el))return false;const t=[el.getAttribute('aria-label'),el.getAttribute('title'),el.textContent].filter(Boolean).join(' ').toLowerCase();return words.some(w=>t.includes(w));});const inputs=[...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].filter(visible);const files=[...document.querySelectorAll('input[type="file"]')].filter(el=>!el.disabled);return JSON.stringify({ok:inputs.length>0||any(inputFallbacks),url:location.href,title:document.title,input:inputs.length>0||any(inputFallbacks),send:semantic(['send','submit','发送','提交','ask','go'])||any(sendFallbacks),newChat:semantic(['new chat','new conversation','新对话','新聊天'])||any(newChatFallbacks),stop:semantic(['stop','停止','停止生成'])||any(stopFallbacks),file:files.length>0});})()
