@@ -1,97 +1,87 @@
-# AIHub Shell MVP
+# AIHub shell MVP
 
-AIHub uses a provider-only shell: one retained Chromium/WebEngine session per AI provider, with no multi-account or workspace management layer.
+AIHub's shell is an overlay on the real Chromium `ChromeTabbedActivity`, not a separate browser Activity.
 
-## Main UI
-
-The shell is organized for fast AI switching rather than browser tab/account management:
-
-- horizontal AI quick-switch rail
-- current AI title
-- back / forward / reload
-- one-tap new chat
-- attachment picker
-- stop generation
-- one shared composer/send control
-- custom AI website add button
-- tools menu for diagnostics, rule updates and integration token
-
-Switching AI reactivates its retained WebEngine surface whenever possible.
-
-## Session behavior
-
-Each provider owns one deterministic browser container:
+## Main layout
 
 ```text
-profileName   = aihub_provider_<providerId>
-persistenceId = aihub_session_<providerId>
+┌──────────────────────────────────────┐
+│ ←  →  ↻       Current AI      ＋ Chrome│
+├──────────────────────────────────────┤
+│ ChatGPT Claude Gemini Grok DeepSeek +AI│
+├──────────────────────────────────────┤
+│                                      │
+│          real Chromium page          │
+│                                      │
+├──────────────────────────────────────┤
+│ ＋   ■   Message current AI…      ➤  │
+└──────────────────────────────────────┘
 ```
 
-The user logs in on the real website. AIHub does not store website passwords or duplicate website session data into its own account model.
+The top and bottom bars are created programmatically by `AiHubUiCoordinator`, which has no Chromium imports.
 
-The provider container retains a Chromium `TabManager`. AIHub resolves Chromium's current active tab at operation time, so authentication popups/new tabs do not leave the shared AI controls permanently bound to the first tab that was opened.
+## Provider switching
 
-## Chromium isolation boundary
+Each provider maps to a retained normal Chrome tab ID. Selecting a provider asks `AiHubBrowserHost` to select that tab. The Chrome-specific bridge resolves the ID with `TabModelSelector` and activates the normal non-incognito tab model.
 
-The shell and core do not import Chromium APIs directly. Direct `org.chromium.webengine.*` usage is limited to one file:
+No page is intentionally rebuilt just because the user switches AI.
+
+## Chrome controls
+
+AIHub hides the normal Chromium control container by default but keeps it alive. The `Chrome` button toggles those controls back on so the user can reach ordinary browser UI instead of AIHub duplicating it.
+
+## Common composer
+
+The shared composer sends text through the generic DOM engine into the current active page. The UI never asks whether the provider is ChatGPT, Claude, Gemini, Grok or DeepSeek.
+
+Action order:
 
 ```text
-AiWebEngineHost.java
+AIHubUiCoordinator
+→ SessionManager
+→ BrowserSessionRuntime
+→ AiHubBrowserHost
+→ current Chrome Tab/main frame
+→ GenericDomScriptFactory
+→ AI website DOM
 ```
 
-`WebEngineSessionRuntime.java` is a stable Chromium-type-free bridge. When Chromium updates, the expected changes are limited to the Host, plus `BUILD.gn`/compatibility signatures if upstream target names or APIs moved.
+## Attachments
 
-## Browser capability rule
+The `＋` attachment button runs `openAttachmentChooser()` against the active AI page. The script clicks the site's actual file input/control and normal Chromium handles the chooser.
 
-AIHub changes the shell, not the browser engine. Authentication redirects, permission behavior, camera/microphone, autofill, safe-browsing behavior, downloads and renderer recovery should remain Chromium/WebEngine responsibilities wherever the selected revision supports them.
+External Android URIs, when an automation/share surface is later attached, use the generic bounded fallback bridge already present in `BrowserSessionRuntime`.
 
-The host manifest declares common browser capabilities but does not silently grant site permissions. Real behavior is verified using `BROWSER_CAPABILITIES.md` and `INTEGRATION_TEST_CHECKLIST.md`.
+## Custom AI
 
-## External-entry security
+`＋ AI` opens a simple name/URL form. Custom provider metadata is persisted by `AiHubStateStore`; the website itself remains a normal Chrome tab with normal Chromium site data.
 
-`AiHubEntryActivity` is the only exported Activity. `AiHubShellActivity` is intentionally unexported.
+## Provider rules
 
-Ordinary Android shares and deep links require user confirmation. Unattended custom Intent/Binder actions require the local client token shown under AIHub Tools.
+At a full Chromium build, repository JSON files are generated into `AiHubGeneratedRules.java`. `ProviderRuleLoader` merges them with custom providers and verified signed overrides.
 
-Switch provider:
+The UI therefore remains generic when provider selectors change.
+
+## Hook boundary
+
+The entire Chrome source integration is one call inserted after the normal control container exists:
+
+```java
+com.yagay.aihub.chromium.AiHubChromeHook.attach(this);
+```
+
+`AiHubChromeHook` creates `AiHubChromeBridge`, then attaches the stable coordinator.
+
+## Build
 
 ```bash
-adb shell am start \
-  -n com.yagay.aihub/com.yagay.aihub.chromium.AiHubEntryActivity \
-  -a com.yagay.aihub.action.SWITCH \
-  --es provider_id claude \
-  --es client_token YOUR_TOKEN
+bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
 ```
 
-Send text to a selected provider:
-
-```bash
-adb shell am start \
-  -n com.yagay.aihub/com.yagay.aihub.chromium.AiHubEntryActivity \
-  -a com.yagay.aihub.action.SEND_TEXT \
-  --es provider_id chatgpt \
-  --es text "Explain this code" \
-  --es client_token YOUR_TOKEN
-```
-
-User-confirmed deep link:
+Output:
 
 ```text
-aihub://send?provider=gemini&text=hello
+out/Default/apks/ChromePublic.apk
 ```
 
-## Chromium development build
-
-Configure an Android Chromium output directory with at least:
-
-```text
-target_os = "android"
-```
-
-Then run:
-
-```bash
-bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
-```
-
-Repository CI verifies the provider-only core, one-file Chromium Java seam, browser-host architecture and security constraints. The final WebEngine integration still requires a real compatible Chromium Android checkout and physical-device test.
+There is no separate AIHub application APK in this architecture.
