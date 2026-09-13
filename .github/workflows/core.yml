@@ -22,6 +22,8 @@ jobs:
         run: python3 scripts/validate_provider_rules.py
       - name: Validate repository wiring
         run: python3 scripts/validate_repo.py
+      - name: Test Chrome overlay patcher
+        run: python3 scripts/test_chrome_overlay.py
       - name: Run core smoke test
         run: bash scripts/run_core_smoke_test.sh
       - name: Sign and verify provider rule bundle
