@@ -111,6 +111,21 @@ public final class SessionManager {
         return currentOrNull();
     }
 
+    public synchronized AiWorkspace renameWorkspace(String workspaceId, String newLabel) {
+        AiWorkspace old = workspaces.require(workspaceId);
+        String label = newLabel == null ? "" : newLabel.trim();
+        if (label.isEmpty()) throw new IllegalArgumentException("Workspace name is required");
+        AiWorkspace renamed = new AiWorkspace(old.id(), label, old.providerAccounts());
+        workspaces.register(renamed);
+        return renamed;
+    }
+
+    public synchronized void removeWorkspace(String workspaceId) {
+        workspaces.require(workspaceId);
+        workspaces.remove(workspaceId);
+        if (workspaceId.equals(activeWorkspaceId)) activeWorkspaceId = null;
+    }
+
     public synchronized AiSession switchProvider(String providerId) {
         return activate(providerId, null, activeWorkspaceId);
     }
