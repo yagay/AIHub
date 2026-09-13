@@ -9,7 +9,7 @@ errors = []
 
 build = (ROOT / "chromium-overlay" / "BUILD.gn").read_text(encoding="utf-8")
 for rel in re.findall(r'"((?:\.\./|java/|res/|assets/)[^"\n]+\.(?:java|aidl|xml|json))"', build):
-    path = (ROOT / "chromium-overlay" / rel).resolve() if not rel.startswith("../") else (ROOT / "chromium-overlay" / rel).resolve()
+    path = (ROOT / "chromium-overlay" / rel).resolve()
     if not path.is_file():
         errors.append(f"BUILD.gn references missing file: {rel}")
 
@@ -22,10 +22,10 @@ layout = (ROOT / "chromium-overlay/res/layout/aihub_activity_main.xml").read_tex
 strings_xml = ET.parse(ROOT / "chromium-overlay/res/values/strings.xml")
 strings = {node.attrib["name"] for node in strings_xml.getroot().findall("string")}
 activity = (ROOT / "chromium-overlay/java/com/yagay/aihub/chromium/AiHubShellActivity.java").read_text(encoding="utf-8")
-for rid in sorted(set(re.findall(r'R\.id\.([A-Za-z0-9_]+)', activity))):
+for rid in sorted(set(re.findall(r'(?<!android\.)R\.id\.([A-Za-z0-9_]+)', activity))):
     if f'@+id/{rid}' not in layout and f'@id/{rid}' not in layout:
         errors.append(f"Activity references missing view id: {rid}")
-for key in sorted(set(re.findall(r'R\.string\.([A-Za-z0-9_]+)', activity))):
+for key in sorted(set(re.findall(r'(?<!android\.)R\.string\.([A-Za-z0-9_]+)', activity))):
     if key not in strings:
         errors.append(f"Activity references missing string: {key}")
 
