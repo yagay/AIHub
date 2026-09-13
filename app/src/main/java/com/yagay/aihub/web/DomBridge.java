@@ -3,13 +3,14 @@ package com.yagay.aihub.web;
 import com.yagay.aihub.model.ProviderSpec;
 
 import java.util.List;
+import java.util.Locale;
 
 /** Shared DOM engine used by every generic web provider. */
 public final class DomBridge {
     private DomBridge() {}
 
     public static String send(ProviderSpec spec, String text) {
-        return """
+        return format("""
             (()=>{
               const value=%s,inputSelectors=%s,sendSelectors=%s;
               const visible=e=>!!e&&!e.disabled&&!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
@@ -25,7 +26,7 @@ public final class DomBridge {
               const button=pick(sendSelectors)||semantic;if(button){button.click();return JSON.stringify({ok:true,method:'button'});}
               input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));input.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));return JSON.stringify({ok:true,method:'enter'});
             })()
-            """.formatted(jsString(text), jsArray(spec.inputSelectors()), jsArray(spec.sendSelectors()));
+            """, jsString(text), jsArray(spec.inputSelectors()), jsArray(spec.sendSelectors()));
     }
 
     public static String newChat(ProviderSpec spec) {
@@ -41,7 +42,7 @@ public final class DomBridge {
      * stay intact. Elements are tagged and hidden, never removed, so commands can still operate them.
      */
     public static String appMode(ProviderSpec spec, boolean enabled) {
-        return """
+        return format("""
             (()=>{
               const enabled=%s,inputSelectors=%s,ATTR='data-aihub-hidden',STYLE='aihub-native-mode';
               const clear=()=>document.querySelectorAll('['+ATTR+']').forEach(e=>e.removeAttribute(ATTR));
@@ -54,13 +55,17 @@ public final class DomBridge {
               const apply=()=>{clear();const input=pick();if(!input)return false;let composer=input.parentElement;for(let e=input.parentElement,i=0;e&&e!==document.body&&i<7;e=e.parentElement,i++){const r=e.getBoundingClientRect();if(r.bottom>=innerHeight*.70&&r.height>20&&r.height<=Math.min(280,innerHeight*.38)&&r.width>=innerWidth*.45)composer=e;}hide(composer);for(const e of document.querySelectorAll('aside,nav,[role="navigation"],header')){if(!visible(e)||e.contains(input))continue;const r=e.getBoundingClientRect();const tag=(e.tagName||'').toLowerCase();const side=(tag==='aside'||tag==='nav'||e.getAttribute('role')==='navigation')&&r.height>=innerHeight*.30&&r.width<=innerWidth*.65;const top=(tag==='header'||r.top<12)&&r.height<=180&&r.width>=innerWidth*.55;if(side||top)hide(e);}return true;};
               if(window.__aihubObserver)window.__aihubObserver.disconnect();const schedule=()=>{if(window.__aihubTimer)clearTimeout(window.__aihubTimer);window.__aihubTimer=setTimeout(apply,150);};window.__aihubObserver=new MutationObserver(schedule);window.__aihubObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','aria-hidden']});return apply()?'on':'waiting';
             })()
-            """.formatted(enabled ? "true" : "false", jsArray(spec.inputSelectors()));
+            """, enabled ? "true" : "false", jsArray(spec.inputSelectors()));
     }
 
     private static String click(List<String> selectors, List<String> words) {
-        return """
+        return format("""
             (()=>{const selectors=%s,words=%s;const visible=e=>!!e&&!e.disabled&&!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);const usable=e=>!!e&&!e.disabled&&(visible(e)||!!e.closest('[data-aihub-hidden="1"]'));for(const s of selectors){try{const e=document.querySelector(s);if(usable(e)){e.click();return 'selector';}}catch(_){}}for(const e of document.querySelectorAll('button,[role="button"],a')){if(!usable(e))continue;const t=[e.getAttribute('aria-label'),e.getAttribute('title'),e.textContent].filter(Boolean).join(' ').toLowerCase();if(words.some(w=>t.includes(w))){e.click();return 'semantic';}}return 'missing';})()
-            """.formatted(jsArray(selectors), jsArray(words));
+            """, jsArray(selectors), jsArray(words));
+    }
+
+    private static String format(String template, Object... values) {
+        return String.format(Locale.ROOT, template, values);
     }
 
     private static String jsArray(List<String> values) {
