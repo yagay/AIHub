@@ -9,7 +9,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.ConsoleMessage;
 import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -19,6 +18,7 @@ import android.widget.TextView;
 
 import androidx.activity.ComponentActivity;
 import androidx.annotation.Nullable;
+import androidx.webkit.WebResourceErrorCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
@@ -83,15 +83,19 @@ public final class UiHost {
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        WebResourceErrorCompat error) {
                 if (request != null && request.isForMainFrame()) {
-                    String detail = error == null ? "unknown WebView error" : String.valueOf(error.getDescription());
+                    String detail = error == null
+                            ? "unknown WebView error"
+                            : String.valueOf(error.getDescription());
                     showFatal("AIHub UI 加载失败\n" + detail + consoleSuffix());
                 }
             }
 
             @Override
-            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+            public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                            WebResourceResponse errorResponse) {
                 if (request != null && request.isForMainFrame()) {
                     int statusCode = errorResponse == null ? 0 : errorResponse.getStatusCode();
                     showFatal("AIHub UI HTTP 错误: " + statusCode + consoleSuffix());
