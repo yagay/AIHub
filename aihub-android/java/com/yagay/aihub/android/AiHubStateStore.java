@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Persists only AIHub metadata; website login/session data remains owned by normal Chromium. */
+/** Persists only AIHub metadata; website login/session data remains owned by the browser engine. */
 public final class AiHubStateStore {
     private static final String PREFS = "aihub_shell_state";
     private static final String KEY_CUSTOM_PROVIDERS = "custom_provider_rules_json";
@@ -22,10 +22,16 @@ public final class AiHubStateStore {
     private static final String KEY_PROVIDER = "current_provider";
     private static final String KEY_CLIENT_TOKEN = "client_token";
 
+    private final Context context;
     private final SharedPreferences prefs;
 
     public AiHubStateStore(Context context) {
-        prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        this.context = context.getApplicationContext();
+        prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    Context context() {
+        return context;
     }
 
     public List<String> loadCustomProviderRules() {
