@@ -2,155 +2,203 @@
 
 ## Hard rules
 
-1. AIHub manages providers, not accounts.
-2. Each provider owns one retained browser session/profile.
-3. UI never branches on a provider name.
-4. Provider differences are configuration first; provider patches are a last resort.
-5. `aihub-core` never depends on Android or Chromium.
-6. Direct `org.chromium.webengine.*` imports are allowed only in `AiWebEngineHost.java`.
-7. `WebEngineSessionRuntime` is a Chromium-type-free bridge and must remain revision-independent.
-8. External callers use `AiCommandBus`; they never receive cookies, login tokens or raw DOM/JavaScript access.
-9. The real shell is never exported; external requests pass through the guarded entry Activity.
+1. AIHub manages providers, not accounts/workspaces.
+2. Each provider maps to one retained normal Chrome tab.
+3. UI never branches on provider names.
+4. Provider differences are JSON/configuration first.
+5. The stable core never imports Android or Chromium APIs.
+6. The stable Android layer never imports Chromium internals.
+7. Direct Chromium Java API use is isolated to `AiHubChromeBridge`; `AiHubChromeHook` may import only `ChromeTabbedActivity`.
+8. Chromium remains responsible for browser features. AIHub changes the AI workflow/UI, not the browser engine.
+9. A Chromium upgrade must not introduce version branches into `aihub-core` or `aihub-android`.
 
 ## Layers
 
 ```text
-AI-first UI -------------------------------┐
-Share / confirmed Deep Link -------------->│
-Token-gated Intent / Binder -------------->│
-                                          ↓
-                                 AiHubEntryActivity
-                              (external validation only)
-                                          ↓
-                                    AiCommandBus
-                                          ↓
-                                   SessionManager
-                                          ↓
-                                    SessionRuntime
-                                          ↓
-                               WebEngineSessionRuntime
-                            (no Chromium API types)
-                                          ↓
-                                  AiWebEngineHost
-                              (only direct API seam)
-                                          ↓
-                                  Chromium WebEngine
-                                          ↓
-                                      AI website
+Provider JSON / custom AI
+           ↓
+      ProviderRegistry
+           ↓
+      SessionManager
+           ↓
+      SessionRuntime
+           ↓
+  BrowserSessionRuntime             aihub-android
+           ↓
+     AiHubBrowserHost
+           ↓
+     AiHubChromeBridge              Chromium seam
+           ↓
+TabModelSelector / Tab / WebContents
+           ↓
+     Chromium Chrome Android
 ```
 
-The generic DOM action generator produces high-level scripts before the host boundary; it does not own Chromium objects.
+The AI overlay itself is also stable Android code:
+
+```text
+AiHubUiCoordinator
+  ├ provider rail
+  ├ custom AI entry
+  ├ common composer
+  ├ new chat / stop / attach
+  ├ browser back/forward/reload
+  └ Chrome-controls toggle
+```
 
 ## Stable core
 
-The core is deliberately small:
+`aihub-core` contains:
 
-- `ProviderConfig`: website, capabilities and selector fallbacks.
-- `AiSessionKey`: only `providerId`.
-- `AiSession`: retained provider session metadata.
-- `SessionManager`: one session per provider and all provider switching.
-- `AiCommandBus`: common command entrance for UI and external callers.
-- `SessionRuntime`: browser implementation boundary.
+- `ProviderConfig`
+- `ProviderRegistry`
+- `AiSessionKey`
+- `AiSession`
+- `SessionManager`
+- `AiCommandBus`
+- `SessionRuntime`
 
-There is no account registry, account model, workspace model or workspace routing layer.
+It is plain Java. There is no Android, Chromium, account, workspace or website-login implementation in the core.
+
+## Stable Android layer
+
+`aihub-android` contains everything that is Android-specific but not Chromium-version-specific:
+
+- `AiHubBrowserHost`
+- `BrowserSessionRuntime`
+- `AiHubUiCoordinator`
+- generic DOM actions
+- custom provider creation
+- provider JSON codec/loader
+- AIHub metadata persistence
+- signed provider rule verification
+
+This layer may use standard Android APIs but must not import `org.chromium.chrome.*`, `org.chromium.content_public.*` or old browser-embedding APIs.
 
 ## Chromium seam
 
-There is one direct Java API adaptation file:
+Exactly two Java files live in the active Chromium-specific package:
 
 ```text
-AiWebEngineHost.java
+AiHubChromeBridge.java
+AiHubChromeHook.java
 ```
 
-`WebEngineSessionRuntime` translates stable AIHub operations into an abstract host interface and derives deterministic provider profile/persistence IDs. It imports no Chromium type.
+### AiHubChromeBridge
 
-`AiWebEngineHost` owns the exact upstream WebEngine classes, fragment/tab manager behavior, navigation calls and Android file bridge.
+Owns current Chromium API calls:
 
-A normal Chromium update should therefore follow this rule:
+- `ChromeTabbedActivity`
+- `TabModelSelector`
+- `TabModelUtils`
+- normal `TabCreator`
+- `Tab` navigation/loading state
+- provider → real Chrome tab-id mapping
+- `WebContents.getMainFrame()`
+- `RenderFrameHost.executeJavaScriptInIsolatedWorld()`
+
+AIHub provider actions always resolve against the current real Chrome browsing environment rather than a second embedded browser.
+
+### AiHubChromeHook
+
+The only purpose of the hook is to construct the bridge and attach the stable coordinator. Its Chromium dependency must remain only `ChromeTabbedActivity`.
+
+## Overlay patch
+
+`scripts/apply_chrome_overlay.py` performs only three build-time mutations:
 
 ```text
-WebEngine Java API changed
-→ adapt AiWebEngineHost.java
-
-GN target/dependency moved
-→ adapt chromium-overlay/BUILD.gn
-
-compatibility signature changed
-→ adapt scripts/check_chromium_checkout.py
-
-SessionManager / AiCommandBus / provider rules / AI UI
-→ unchanged
+1. generate AiHubGeneratedRules.java from provider JSON/public key
+2. add AIHub Java sources to chrome_java_sources.gni
+3. insert AiHubChromeHook.attach(this) after ChromeTabbedActivity creates control_container
 ```
 
-Repository CI rejects any direct WebEngine import outside `AiWebEngineHost.java`.
+No large Chromium source fork is copied into this repository.
 
-## Provider session strategy
+## Provider tab strategy
 
-Each provider gets one deterministic profile and persistence ID:
+AIHub stores only the normal Chrome tab ID associated with each provider ID:
 
 ```text
-profileName   = aihub_provider_<providerId>
-persistenceId = aihub_session_<providerId>
+chatgpt  -> tab 123
+claude   -> tab 126
+gemini   -> tab 131
 ```
 
-Examples:
+When switching AI:
 
 ```text
-ChatGPT  -> aihub_provider_chatgpt
-Claude   -> aihub_provider_claude
-Gemini   -> aihub_provider_gemini
+provider id
+→ retained tab id
+→ TabModelSelector.getTabById()
+→ select normal model
+→ select that real tab
 ```
 
-The user logs in directly on each real AI website. Cookies, local storage, IndexedDB and website auth state remain owned by Chromium/WebEngine.
+If the tab no longer exists, opening the provider creates a normal foreground Chrome tab and stores the new ID.
 
-## Active-tab invariant
+Website cookies/login state remain normal Chromium state. AIHub does not duplicate or export them.
 
-A provider session owns a `TabManager`, not one permanently cached first `Tab`.
+## DOM action model
 
-Every normal browser/AI action resolves Chromium's current active tab at operation time. This is required for OAuth, login popups and pages that activate a new tab/window. Attachment upload captures one active tab at the start of that upload so a single transaction cannot be split across pages.
+The shared composer does not maintain provider-specific controllers. `GenericDomScriptFactory` uses semantic discovery first and JSON selectors as fallback.
 
-AIHub must not build a parallel popup/tab system unless the selected WebEngine revision proves that an embedder hook is required.
+The current tab's live main frame executes the generic script in an isolated world. This keeps AIHub code outside the page's normal JavaScript world while still operating on the same DOM.
 
-## AI-first switching
+Provider-specific differences belong in JSON selectors. A provider-specific Java implementation is a last resort and should not contain session/UI/browser ownership.
 
-The main UI always exposes a horizontal provider rail. Switching provider calls only:
+## Attachments
+
+Two paths are intentionally different:
 
 ```text
-SessionManager.switchProvider(providerId)
+AIHub attach button
+→ click website's real input[type=file]
+→ Chrome native file chooser
+
+Android external share URI
+→ AIHub ContentResolver bridge
+→ generic DataTransfer/file-input injection
 ```
 
-If that provider has already been opened, its retained browser surface is reactivated rather than intentionally rebuilding the page.
+The first path preserves Chrome's normal file chooser behavior. The second exists only because the file URI has already been selected by another Android app.
 
-## Unified browser and AI actions
+## Browser capability ownership
 
-AIHub keeps browser controls and AI controls together:
+Chromium owns:
 
-- back / forward / reload
-- provider quick switch
-- new chat
-- attachment picker
-- stop generation
-- shared composer/send
+- cookies/storage/login/OAuth
+- permissions and site settings
+- downloads
+- media
+- popup/new-window behavior
+- password manager/autofill
+- network/security stack
+- tab restore/lifecycle
 
-The generic DOM engine uses semantic discovery first and provider JSON selectors as fallback. Provider-specific patches must never contain session, browser or UI logic.
+AIHub owns:
 
-## Chromium capability policy
+- provider list
+- provider-to-tab association
+- AI switching UI
+- common composer/actions
+- provider rules
+- custom AI metadata
 
-AIHub preserves browser capability through Chromium/WebEngine instead of reimplementing it per AI. Authentication redirects, permissions, camera/microphone, autofill, safe-browsing behavior, downloads, renderer recovery and other browser features belong to Chromium or the single host seam where the selected revision requires embedder code.
+## Upgrade rule
 
-The manifest declares common media/location/notification capabilities but does not grant them silently. Actual browser/site permission behavior must be verified against the selected Chromium revision on-device.
+For a new Chromium revision:
 
-See `BROWSER_CAPABILITIES.md` and `INTEGRATION_TEST_CHECKLIST.md`.
+```text
+scripts/check_chromium_checkout.py
+        ↓
+if API/anchor moved
+        ↓
+AiHubChromeBridge.java
+apply_chrome_overlay.py
+check_chromium_checkout.py
+        ↓
+aihub-core and aihub-android stay unchanged
+```
 
-## Third-party API security
-
-- **AIDL/Binder**: unattended operations require the local AIHub client token.
-- **Explicit Intents**: provider-only targeting; unattended execution requires the token in Intent extras.
-- **Android Shares**: require explicit user confirmation.
-- **Deep links**: tokenless and require explicit user confirmation.
-
-Never expose cookies, localStorage, IndexedDB, website auth tokens or raw JavaScript execution to third parties.
-
-## Provider maintenance
-
-Built-in, custom and signed-update providers use the same `ProviderConfig`/JSON rule model. A signed update may override a built-in provider by ID only after Ed25519 verification. The previous signed bundle is retained for rollback.
+That separation is the primary maintenance invariant of the project.
