@@ -12,11 +12,11 @@ mkdir -p "$(dirname "$WORK")" "$OUT"
 git clone --filter=blob:none --no-checkout https://github.com/ChatGPTNextWeb/NextChat.git "$WORK"
 git -C "$WORK" checkout --detach "$NEXTCHAT_COMMIT"
 
-cp "$ROOT/ui/nextchat/aihub-browser.ts" "$WORK/app/client/platforms/aihub-browser.ts"
 python3 "$ROOT/ui/nextchat/patch_nextchat.py" "$WORK"
 
 cd "$WORK"
 export HUSKY=0
+export NEXT_TELEMETRY_DISABLED=1
 corepack enable >/dev/null 2>&1 || true
 corepack prepare yarn@1.22.19 --activate >/dev/null 2>&1 || true
 yarn install --frozen-lockfile --network-timeout 600000
@@ -27,4 +27,4 @@ cp "$ROOT/ui/nextchat/NEXTCHAT_LICENSE.txt" "$OUT/NEXTCHAT_LICENSE.txt"
 
 test -f "$OUT/index.html"
 test -d "$OUT/_next"
-echo "NextChat UI built from $NEXTCHAT_COMMIT"
+echo "NextChat UI built from $NEXTCHAT_COMMIT for AIHub local gateway"
