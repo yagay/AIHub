@@ -18,6 +18,9 @@ import android.widget.TextView;
 
 import androidx.activity.ComponentActivity;
 import androidx.annotation.Nullable;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebResourceErrorCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
@@ -40,11 +43,41 @@ public final class UiHost {
     private volatile String lastConsoleError = "";
     private volatile String lastLoadedUrl = "";
     private volatile Runnable diagnosticAction;
+    private volatile int insetLeft;
+    private volatile int insetTop;
+    private volatile int insetRight;
+    private volatile int insetBottom;
+    private volatile int imeBottom;
 
     public UiHost(ComponentActivity activity) {
         this.activity = activity;
         root = new FrameLayout(activity);
         root.setBackgroundColor(Color.rgb(21, 21, 21));
+
+        // Android 15+ enforces edge-to-edge for modern target SDKs. Keep the window
+        // edge-to-edge, but move all interactive AIHub content into the safe area.
+        // This handles status bars, display cutouts, gesture/3-button navigation and IME.
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
+            Insets safe = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout());
+            Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+
+            insetLeft = safe.left;
+            insetTop = safe.top;
+            insetRight = safe.right;
+            insetBottom = safe.bottom;
+            imeBottom = ime.bottom;
+
+            int bottom = Math.max(safe.bottom, ime.bottom);
+            if (view.getPaddingLeft() != safe.left
+                    || view.getPaddingTop() != safe.top
+                    || view.getPaddingRight() != safe.right
+                    || view.getPaddingBottom() != bottom) {
+                view.setPadding(safe.left, safe.top, safe.right, bottom);
+            }
+            return windowInsets;
+        });
 
         webView = new WebView(activity);
         webView.setBackgroundColor(Color.rgb(21, 21, 21));
@@ -130,6 +163,7 @@ public final class UiHost {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // Always stays above the WebView/status layer so diagnostics are reachable even on a blank UI.
+        // The root itself is inset-aware, therefore this button never sits under the status bar/cutout.
         diagnostics = new TextView(activity);
         diagnostics.setText("诊断");
         diagnostics.setTextColor(Color.WHITE);
@@ -144,9 +178,12 @@ public final class UiHost {
         FrameLayout.LayoutParams diagnosticParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         diagnosticParams.gravity = Gravity.TOP | Gravity.END;
-        diagnosticParams.topMargin = dp(18);
-        diagnosticParams.rightMargin = dp(14);
+        diagnosticParams.topMargin = dp(8);
+        diagnosticParams.rightMargin = dp(10);
         root.addView(diagnostics, diagnosticParams);
+
+        // Ask for the initial inset dispatch after all children are attached.
+        ViewCompat.requestApplyInsets(root);
     }
 
     private int dp(int value) {
@@ -166,7 +203,10 @@ public final class UiHost {
         return "pageReady=" + pageReady + "\n"
                 + "stickyStatus=" + stickyStatus + "\n"
                 + "lastLoadedUrl=" + lastLoadedUrl + "\n"
-                + "lastConsoleError=" + lastConsoleError + "\n";
+                + "lastConsoleError=" + lastConsoleError + "\n"
+                + "systemInsets=" + insetLeft + "," + insetTop + ","
+                + insetRight + "," + insetBottom + "\n"
+                + "imeBottom=" + imeBottom + "\n";
     }
 
     public void start() {
