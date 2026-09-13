@@ -21,9 +21,13 @@ public final class AiHubExternalCommandParser {
 
         if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
             List<String> streams = collectSharedUris(intent);
-            if (!streams.isEmpty()) return AiCommand.attach(streams);
             CharSequence shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
-            if (shared != null && !shared.toString().isBlank()) return AiCommand.send(shared.toString());
+            String text = shared == null ? null : shared.toString();
+            if (!streams.isEmpty() && text != null && !text.isBlank()) {
+                return AiCommand.attachAndSend(streams, text);
+            }
+            if (!streams.isEmpty()) return AiCommand.attach(streams);
+            if (text != null && !text.isBlank()) return AiCommand.send(text);
             return null;
         }
 
@@ -52,7 +56,12 @@ public final class AiHubExternalCommandParser {
         }
         if (AiHubContract.ACTION_ATTACH.equals(action)) {
             ArrayList<String> uris = intent.getStringArrayListExtra(AiHubContract.EXTRA_URI_LIST);
-            return AiCommand.attach(uris == null ? List.of() : uris);
+            String text = intent.getStringExtra(AiHubContract.EXTRA_TEXT);
+            List<String> safeUris = uris == null ? List.of() : uris;
+            if (!safeUris.isEmpty() && text != null && !text.isBlank()) {
+                return AiCommand.attachAndSend(safeUris, text);
+            }
+            return AiCommand.attach(safeUris);
         }
         if (AiHubContract.ACTION_NEW_CHAT.equals(action)) return AiCommand.simple(AiCommandType.NEW_CHAT);
         if (AiHubContract.ACTION_STOP.equals(action)) return AiCommand.simple(AiCommandType.STOP);
