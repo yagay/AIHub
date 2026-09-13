@@ -72,6 +72,45 @@ public final class SessionManager {
         return candidates.get(0).id();
     }
 
+    public synchronized AiAccount renameAccount(String accountId, String newLabel) {
+        AiAccount old = accounts.require(accountId);
+        String label = newLabel == null ? "" : newLabel.trim();
+        if (label.isEmpty()) throw new IllegalArgumentException("Account name is required");
+        AiAccount renamed = new AiAccount(old.id(), old.providerId(), label, old.profileName());
+        accounts.register(renamed);
+        return renamed;
+    }
+
+    public synchronized AiSession removeAccount(String accountId) {
+        AiAccount removed = accounts.require(accountId);
+        List<AiAccount> providerAccounts = accounts.forProvider(removed.providerId());
+        if (providerAccounts.size() <= 1) {
+            throw new IllegalStateException("Keep at least one account for " + removed.providerId());
+        }
+
+        AiSessionKey removedKey = new AiSessionKey(removed.providerId(), removed.id());
+        AiSession existing = sessions.remove(removedKey);
+        if (existing != null) runtime.close(removedKey);
+        accounts.remove(removed.id());
+        if (removed.id().equals(lastAccountByProvider.get(removed.providerId()))) {
+            lastAccountByProvider.remove(removed.providerId());
+        }
+
+        String replacement = preferredAccountId(removed.providerId());
+        for (AiWorkspace workspace : workspaces.all()) {
+            if (!removed.id().equals(workspace.accountFor(removed.providerId()))) continue;
+            Map<String, String> mapping = new LinkedHashMap<>(workspace.providerAccounts());
+            mapping.put(removed.providerId(), replacement);
+            workspaces.register(new AiWorkspace(workspace.id(), workspace.label(), mapping));
+        }
+
+        if (removedKey.equals(current)) {
+            current = null;
+            return activate(removed.providerId(), replacement, activeWorkspaceId);
+        }
+        return currentOrNull();
+    }
+
     public synchronized AiSession switchProvider(String providerId) {
         return activate(providerId, null, activeWorkspaceId);
     }
