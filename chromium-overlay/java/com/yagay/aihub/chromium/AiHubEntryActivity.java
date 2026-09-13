@@ -9,18 +9,14 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.yagay.aihub.R;
-import com.yagay.aihub.core.AiAccount;
-import com.yagay.aihub.core.AiWorkspace;
 import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.AiCommandType;
 import com.yagay.aihub.core.provider.ProviderRegistry;
 
-import java.util.List;
-
 /**
- * The only exported Activity. Private automation is token-gated; ordinary shares and deep links
- * require explicit user confirmation before they can reach the unexported shell.
+ * The only exported Activity. Token-gated automation can pass through immediately; ordinary shares
+ * and deep links require explicit user confirmation before reaching the unexported shell.
  */
 public final class AiHubEntryActivity extends AppCompatActivity {
     public static final String EXTRA_INTERNAL_DISPATCH = "com.yagay.aihub.internal.DISPATCH";
@@ -56,32 +52,21 @@ public final class AiHubEntryActivity extends AppCompatActivity {
             return;
         }
 
-        if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
-            AiCommand command = AiHubExternalCommandParser.parse(source, stateStore.clientToken());
-            if (command == null) {
-                deny();
-                return;
-            }
-            confirmAndForward(source, R.string.share_confirm_title, command);
-            return;
-        }
-
-        if (Intent.ACTION_VIEW.equals(action)) {
-            AiCommand command = AiHubExternalCommandParser.parse(source, stateStore.clientToken());
-            if (command == null) {
-                deny();
-                return;
-            }
-            confirmAndForward(source, R.string.link_confirm_title, command);
-            return;
-        }
-
-        // Unattended custom Intent actions must carry the local client token in an Intent extra.
         AiCommand command = AiHubExternalCommandParser.parse(source, stateStore.clientToken());
         if (command == null) {
             deny();
             return;
         }
+
+        if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            confirmAndForward(source, R.string.share_confirm_title, command);
+            return;
+        }
+        if (Intent.ACTION_VIEW.equals(action)) {
+            confirmAndForward(source, R.string.link_confirm_title, command);
+            return;
+        }
+
         forwardToShell(source);
     }
 
@@ -96,65 +81,27 @@ public final class AiHubEntryActivity extends AppCompatActivity {
         confirmationDialog.show();
     }
 
-    /** Builds a non-secret preview using the same target priority as AiCommandBus. */
     private String buildConfirmationDetails(AiCommand command) {
         ProviderRegistry providers = new ProviderRuleLoader(this, stateStore).load();
-        List<AiAccount> accounts = stateStore.loadAccounts();
-        List<AiWorkspace> workspaces = stateStore.loadWorkspaces();
+        String providerId = command.providerId();
+        if (providerId == null || providerId.isBlank()) providerId = stateStore.savedProviderId();
 
-        String providerId = clean(command.providerId());
-        String accountId = clean(command.accountId());
-        String workspaceId = clean(command.workspaceId());
-
-        if (accountId != null) {
-            AiAccount explicit = findAccount(accounts, accountId);
-            if (explicit != null) providerId = explicit.providerId();
-            workspaceId = null;
-        } else if (workspaceId != null) {
-            if (providerId == null) providerId = clean(stateStore.savedProviderId());
-            accountId = accountForWorkspace(workspaces, workspaceId, providerId);
-        } else if (providerId != null) {
-            // Provider-only commands preserve the current workspace.
-            workspaceId = clean(stateStore.savedWorkspaceId());
-            if (workspaceId != null) {
-                accountId = accountForWorkspace(workspaces, workspaceId, providerId);
-            } else if (providerId.equals(clean(stateStore.savedProviderId()))) {
-                accountId = clean(stateStore.savedAccountId());
-            }
-        } else {
-            providerId = clean(stateStore.savedProviderId());
-            accountId = clean(stateStore.savedAccountId());
-            workspaceId = clean(stateStore.savedWorkspaceId());
-        }
-
-        if (providerId == null && !providers.all().isEmpty()) {
-            providerId = providers.all().get(0).id();
-        }
-        if (accountId == null && providerId != null) {
-            for (AiAccount candidate : accounts) {
-                if (providerId.equals(candidate.providerId())) {
-                    accountId = candidate.id();
-                    break;
-                }
-            }
-        }
-
-        String providerLabel = providerLabel(providers, providerId);
-        String accountLabel = accountLabel(accounts, accountId);
-        String workspaceLabel = workspaceLabel(workspaces, workspaceId);
-
-        if (command.type() == AiCommandType.NEXT_PROVIDER
-                || command.type() == AiCommandType.PREVIOUS_PROVIDER) {
+        String providerLabel = getString(R.string.external_target_current);
+        if (command.type() == AiCommandType.NEXT_PROVIDER || command.type() == AiCommandType.PREVIOUS_PROVIDER) {
             providerLabel = getString(R.string.external_target_automatic);
-            accountLabel = getString(R.string.external_target_automatic);
+        } else if (providerId != null && !providerId.isBlank()) {
+            try {
+                ProviderConfig provider = providers.require(providerId);
+                providerLabel = provider.displayName();
+            } catch (RuntimeException ignored) {
+                providerLabel = providerId;
+            }
         }
 
         return getString(
                 R.string.external_confirm_details,
                 actionLabel(command.type()),
-                providerLabel,
-                accountLabel,
-                workspaceLabel);
+                providerLabel);
     }
 
     private String actionLabel(AiCommandType type) {
@@ -171,55 +118,6 @@ public final class AiHubEntryActivity extends AppCompatActivity {
             case NEXT_PROVIDER -> getString(R.string.external_action_next);
             case PREVIOUS_PROVIDER -> getString(R.string.external_action_previous);
         };
-    }
-
-    private String providerLabel(ProviderRegistry providers, String providerId) {
-        if (providerId == null) return getString(R.string.external_target_automatic);
-        try {
-            ProviderConfig provider = providers.require(providerId);
-            return provider.displayName();
-        } catch (RuntimeException ignored) {
-            return providerId;
-        }
-    }
-
-    private String accountLabel(List<AiAccount> accounts, String accountId) {
-        if (accountId == null) return getString(R.string.external_target_automatic);
-        AiAccount account = findAccount(accounts, accountId);
-        return account == null ? accountId : account.label();
-    }
-
-    private String workspaceLabel(List<AiWorkspace> workspaces, String workspaceId) {
-        if (workspaceId == null) return getString(R.string.external_target_none);
-        for (AiWorkspace workspace : workspaces) {
-            if (workspace.id().equals(workspaceId)) return workspace.label();
-        }
-        return workspaceId;
-    }
-
-    private static AiAccount findAccount(List<AiAccount> accounts, String accountId) {
-        if (accountId == null) return null;
-        for (AiAccount account : accounts) {
-            if (account.id().equals(accountId)) return account;
-        }
-        return null;
-    }
-
-    private static String accountForWorkspace(
-            List<AiWorkspace> workspaces,
-            String workspaceId,
-            String providerId) {
-        if (workspaceId == null || providerId == null) return null;
-        for (AiWorkspace workspace : workspaces) {
-            if (workspace.id().equals(workspaceId)) return clean(workspace.accountFor(providerId));
-        }
-        return null;
-    }
-
-    private static String clean(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private void forwardToShell(@Nullable Intent source) {
