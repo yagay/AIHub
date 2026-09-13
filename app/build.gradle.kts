@@ -3,6 +3,8 @@ plugins {
 }
 
 val aihubAbi = providers.gradleProperty("aihubAbi").orNull
+val aihubVersionCode = providers.gradleProperty("aihubVersionCode").orNull?.toIntOrNull()
+val aihubVersionName = providers.gradleProperty("aihubVersionName").orNull
 
 android {
     namespace = "com.yagay.aihub"
@@ -16,8 +18,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 28
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = aihubVersionCode ?: 3
+        versionName = aihubVersionName ?: "0.3.0"
 
         aihubAbi?.takeIf { it.isNotBlank() }?.let { abi ->
             ndk {
