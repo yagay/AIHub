@@ -22,4 +22,5 @@ else
   echo "AIHub synced to: $DEST"
 fi
 
-echo "Build target: autoninja -C out/Default //aihub/chromium-overlay:aihub_local"
+echo "Next: python3 $DEST/scripts/apply_chrome_overlay.py $CHROMIUM_SRC"
+echo "Build target: autoninja -C out/Default chrome_public_apk"
