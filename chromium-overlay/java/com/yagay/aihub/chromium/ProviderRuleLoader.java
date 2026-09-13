@@ -3,7 +3,6 @@ package com.yagay.aihub.chromium;
 import android.content.Context;
 import android.content.res.AssetManager;
 
-import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.provider.BuiltinProviders;
 import com.yagay.aihub.core.provider.ProviderRegistry;
 
@@ -13,9 +12,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/** Loads provider differences from JSON assets plus user-added custom provider rules. */
+/** Loads provider differences from JSON assets, custom providers and verified signed overrides. */
 public final class ProviderRuleLoader {
     private static final String ASSET_DIR = "aihub/providers";
 
@@ -33,10 +34,10 @@ public final class ProviderRuleLoader {
     }
 
     public ProviderRegistry load() {
-        ProviderRegistry registry = new ProviderRegistry();
         warnings.clear();
-        List<ProviderRuleCodec.Decoded> decoded = new ArrayList<>();
+        Map<String, ProviderRuleCodec.Decoded> merged = new LinkedHashMap<>();
 
+        // Lowest priority: APK-bundled rules.
         try {
             AssetManager assets = context.getAssets();
             String[] names = assets.list(ASSET_DIR);
@@ -45,7 +46,9 @@ public final class ProviderRuleLoader {
                 for (String name : names) {
                     if (!name.endsWith(".json")) continue;
                     try {
-                        decoded.add(ProviderRuleCodec.decode(readAsset(assets, ASSET_DIR + "/" + name)));
+                        ProviderRuleCodec.Decoded rule = ProviderRuleCodec.decode(
+                                readAsset(assets, ASSET_DIR + "/" + name));
+                        merged.put(rule.provider().id(), rule);
                     } catch (Exception error) {
                         warnings.add(name + ": " + error.getMessage());
                     }
@@ -55,19 +58,36 @@ public final class ProviderRuleLoader {
             warnings.add("provider asset list: " + error.getMessage());
         }
 
+        // User-created providers replace a matching bundled id (normally custom ids are unique).
         for (String customRule : stateStore.loadCustomProviderRules()) {
             try {
-                decoded.add(ProviderRuleCodec.decode(customRule));
+                ProviderRuleCodec.Decoded rule = ProviderRuleCodec.decode(customRule);
+                merged.put(rule.provider().id(), rule);
             } catch (Exception error) {
                 warnings.add("custom provider: " + error.getMessage());
             }
         }
 
+        // Highest priority: rules that passed the configured Ed25519 verifier.
+        String remoteEnvelope = stateStore.remoteRuleBundle();
+        if (remoteEnvelope != null && !remoteEnvelope.isBlank()) {
+            try {
+                SignedProviderRuleBundle signed = new SignedProviderRuleBundle(context, stateStore);
+                for (ProviderRuleCodec.Decoded rule : signed.loadInstalled()) {
+                    merged.put(rule.provider().id(), rule);
+                }
+            } catch (Exception error) {
+                warnings.add("signed provider rules ignored: " + error.getMessage());
+            }
+        }
+
+        List<ProviderRuleCodec.Decoded> decoded = new ArrayList<>(merged.values());
         decoded.sort(Comparator
                 .comparingInt(ProviderRuleCodec.Decoded::order)
                 .thenComparing(item -> item.provider().displayName(), String.CASE_INSENSITIVE_ORDER));
-        for (ProviderRuleCodec.Decoded item : decoded) registry.register(item.provider());
 
+        ProviderRegistry registry = new ProviderRegistry();
+        for (ProviderRuleCodec.Decoded item : decoded) registry.register(item.provider());
         if (registry.all().isEmpty()) {
             warnings.add("No valid provider rules loaded; using built-in fallback registry");
             return BuiltinProviders.createDefaultRegistry();
