@@ -1,8 +1,8 @@
 # AIHub
 
-AIHub is a lightweight Android client that uses the official AI websites through **Android System WebView**, while presenting a small shared native Android interface.
+AIHub is a lightweight Android client for using official AI websites through **Android System WebView** behind one shared native interface.
 
-It does **not** bundle or compile Chromium. The device WebView runtime provides the browser engine.
+It does **not** bundle Chromium and does not require API keys for the built-in web providers.
 
 Built-in providers:
 
@@ -12,102 +12,130 @@ Built-in providers:
 - Grok
 - DeepSeek
 
-## Design goals
+Current version: **0.2.0**
 
-1. One shared implementation, not one app implementation per AI.
-2. Provider-specific website details stay behind a small adapter boundary.
-3. Provider/account sessions are retained when switching.
-4. Multi-account login data is isolated with AndroidX WebKit profiles when supported by the installed WebView runtime.
-5. Native UI never knows CSS selectors, cookies or WebView details.
-6. Adding or repairing one provider should not require changing the app UI or session engine.
+## What works
 
-## Architecture
+- One native provider switcher for all built-in AIs.
+- APP / WEB mode switching.
+- Native message composer with send, stop, new-chat, reload and attachment entry points.
+- Native conversation mirror in APP mode.
+- Full official website in WEB mode for sign-in, verification, settings and unsupported features.
+- Multiple accounts per provider using AndroidX WebKit profiles when supported by the installed WebView runtime.
+- Retained provider/account WebViews, so switching does not recreate every session.
+- Shared file chooser for website uploads.
+- Shared DownloadManager integration.
+- Shared popup-window handling for website login/navigation flows.
+- Text sharing from other Android apps into the AIHub composer.
+- Provider configuration validation in CI.
+- Debug APK build + Android lint on every latest `main` change.
+
+## Core design
 
 ```text
+providers.json
+      ↓
+ProviderRegistry
+      ↓
+AiProviderAdapter
+      ↓
+GenericWebProviderAdapter
+      ↓
+DomBridge
+      ↓
+WebSessionManager
+      ↓
+WebViewFactory
+      ↓
+Android System WebView
+
 MainActivity
-    ↓
+      ↓
 MainController
-    ├── MainScreen                 native Android UI only
-    ├── ProviderRegistry
-    │      └── providers.json      URLs/selectors only
-    │             ↓
-    │      AiProviderAdapter
-    │             └── GenericWebProviderAdapter
-    │                    └── ProviderSpec
-    ├── AccountRepository
-    ├── AppPreferences
-    └── WebSessionManager
-           ├── SessionKey(provider + account)
-           ├── WebViewFactory
-           └── DomBridge
+      ↓
+MainScreen (native UI)
 ```
 
-### Stable boundaries
-
-`ui/`
-: Native app controls. No website-specific code.
-
-`provider/`
-: Uniform AI-provider interface. Normal providers reuse `GenericWebProviderAdapter`.
-
-`assets/providers.json`
-: Single configuration source for provider URLs and selector fallbacks.
-
-`model/`
-: Small immutable data models such as `ProviderSpec` and `AccountProfile`.
-
-`session/`
-: Retains and switches WebViews for each provider/account pair.
-
-`web/`
-: All WebView configuration and generic DOM JavaScript live here.
-
-`data/`
-: App metadata only. Passwords and website credentials are never stored by AIHub.
-
-## Updating an AI website
-
-The normal maintenance path is intentionally small:
+The built-in providers reuse the same Java implementation. Provider-specific website details are data in:
 
 ```text
 app/src/main/assets/providers.json
-        ↓
-change URL/selectors for one provider
-        ↓
-no UI/session/account changes required
 ```
 
-Adding a normal AI website is also just another entry in `providers.json`.
+That file contains:
 
-If a provider eventually needs behavior that cannot be represented by generic selectors, create a provider-specific implementation of `AiProviderAdapter`. The rest of the application stays unchanged.
+- home URL
+- trusted host names
+- composer selectors
+- send/new-chat/stop selectors
+- attachment selectors
+- user-message selectors
+- assistant-message selectors
 
-## APP mode vs WEB mode
+For normal website changes, update that file instead of changing the Android UI/session engine.
 
-AIHub keeps the official website as the service/session layer.
+## APP mode
 
-**APP mode** hides common website chrome and the website composer after a usable chat input is detected. AIHub's native controls send commands through the provider adapter.
+APP mode does **not** rebuild or remove the website DOM.
 
-**WEB mode** shows the normal website, useful for login, verification, settings or features not yet exposed by AIHub's native UI.
+The official website remains fully running underneath, while AIHub displays a native conversation surface above it. Native controls invoke the real website controls through the shared provider adapter, and the conversation mirror periodically normalizes rendered website messages into:
 
-Hidden website elements are not removed from the DOM, so the shared command engine can continue to operate the real website controls.
+```text
+ChatMessage(role, text)
+```
+
+This keeps the native interface independent from provider-specific HTML structure while avoiding destructive CSS/DOM modifications.
+
+If a website feature is not currently represented in the native UI, tap **APP** to switch to **WEB** and use the normal official page.
+
+## WEB mode
+
+WEB mode exposes the complete official website. Use it for:
+
+- initial sign-in
+- account verification
+- provider settings
+- advanced model/tool selectors
+- website-specific features not yet mapped to native controls
+
+Some identity providers may restrict sign-in from embedded WebViews. That is controlled by the website/provider, not AIHub. WEB mode cannot bypass provider authentication policy.
 
 ## Multi-account model
 
-Each account is represented by a stable profile id:
+AIHub stores only local account labels and stable IDs. Website passwords are never stored by AIHub.
+
+Each provider/account pair receives a stable WebView profile name such as:
 
 ```text
-ChatGPT / Personal → aihub_chatgpt_<id>
-ChatGPT / Work     → aihub_chatgpt_<id>
-Claude / Personal → aihub_claude_<id>
+aihub_chatgpt_<account-id>
+aihub_claude_<account-id>
 ```
 
-When `WebViewFeature.MULTI_PROFILE` is supported, `WebViewCompat.setProfile()` assigns each retained WebView its own browsing profile. Cookies, storage and login sessions therefore stay isolated between accounts.
+When `WebViewFeature.MULTI_PROFILE` is available, cookies/storage are isolated by the WebView runtime. On runtimes without that capability, AIHub warns that website state may be shared.
 
-AIHub stores only account labels and profile identifiers in SharedPreferences. Website credentials remain owned by WebView.
+## External Android integration
+
+AIHub registers as a `text/plain` Android share target.
+
+Any app can share text to AIHub; the text is placed into the native composer for the user to review and send. AIHub intentionally does not auto-submit arbitrary external text.
+
+## Updating providers
+
+Normal maintenance path:
+
+```text
+edit providers.json
+        ↓
+python3 tools/validate_providers.py
+        ↓
+CI build + lint
+```
+
+The validator catches malformed JSON, duplicate IDs, invalid HTTPS home URLs, bad trusted-host mappings and malformed selector groups.
+
+If a future provider requires behavior that cannot be expressed by selectors, create a dedicated `AiProviderAdapter` implementation. Do not add provider-name conditionals to the UI or session engine.
 
 ## Project structure
-
-The rebuilt project intentionally has only one Gradle Android module:
 
 ```text
 AIHub/
@@ -115,12 +143,19 @@ AIHub/
 │   └── src/main/
 │       ├── assets/providers.json
 │       └── java/com/yagay/aihub/
+│           ├── app/
+│           ├── data/
+│           ├── model/
+│           ├── provider/
+│           ├── session/
+│           ├── ui/
+│           └── web/
+├── tools/validate_providers.py
+├── docs/ARCHITECTURE.md
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── .github/workflows/core.yml
 ```
-
-The previous `aihub-core` and `aihub-android` trees were removed from `main`; there is only one active implementation to maintain.
 
 ## Build
 
@@ -139,10 +174,22 @@ Build:
 gradle :app:assembleDebug
 ```
 
+Lint:
+
+```bash
+gradle :app:lintDebug
+```
+
 APK:
 
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions builds and lints every push to `main` and uploads the debug APK artifact.
+GitHub Actions validates `providers.json`, builds the debug APK, runs Android lint and uploads the APK artifact.
+
+## Maintenance rule
+
+Keep provider differences in configuration or provider adapters. Keep the rest shared.
+
+The goal is that adding or repairing one AI provider does not require cloning UI, account, WebView, file, download or session code.
