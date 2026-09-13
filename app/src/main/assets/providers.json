@@ -1,0 +1,57 @@
+[
+  {
+    "id": "chatgpt",
+    "name": "ChatGPT",
+    "homeUrl": "https://chatgpt.com/",
+    "selectors": {
+      "input": ["#prompt-textarea", "textarea"],
+      "send": ["button[data-testid='send-button']", "button[aria-label*='Send']"],
+      "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
+      "stop": ["button[aria-label*='Stop']"]
+    }
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "homeUrl": "https://claude.ai/new",
+    "selectors": {
+      "input": ["div[contenteditable='true']", "textarea"],
+      "send": ["button[aria-label*='Send']"],
+      "newChat": ["a[href='/new']", "button[aria-label*='New']"],
+      "stop": ["button[aria-label*='Stop']"]
+    }
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini",
+    "homeUrl": "https://gemini.google.com/app",
+    "selectors": {
+      "input": [".ql-editor[contenteditable='true']", "div[contenteditable='true']", "textarea"],
+      "send": ["button[aria-label*='Send']", "button[aria-label*='submit']"],
+      "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
+      "stop": ["button[aria-label*='Stop']"]
+    }
+  },
+  {
+    "id": "grok",
+    "name": "Grok",
+    "homeUrl": "https://grok.com/",
+    "selectors": {
+      "input": ["textarea", "div[contenteditable='true']"],
+      "send": ["button[aria-label*='Send']"],
+      "newChat": ["a[href='/']", "button[aria-label*='New']"],
+      "stop": ["button[aria-label*='Stop']"]
+    }
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "homeUrl": "https://chat.deepseek.com/",
+    "selectors": {
+      "input": ["textarea", "div[contenteditable='true']"],
+      "send": ["button[aria-label*='Send']"],
+      "newChat": ["button[aria-label*='New']", "a[href='/']"],
+      "stop": ["button[aria-label*='Stop']"]
+    }
+  }
+]
