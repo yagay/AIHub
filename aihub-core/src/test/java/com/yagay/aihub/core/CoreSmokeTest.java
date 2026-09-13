@@ -7,73 +7,25 @@ import com.yagay.aihub.core.provider.BuiltinProviders;
 import com.yagay.aihub.core.provider.ProviderRegistry;
 import com.yagay.aihub.core.runtime.RecordingSessionRuntime;
 import java.util.List;
-import java.util.Map;
 
 public final class CoreSmokeTest {
     public static void main(String[] args) {
         ProviderRegistry providers = BuiltinProviders.createDefaultRegistry();
-        AccountRegistry accounts = new AccountRegistry();
-        accounts.register(new AiAccount("gpt_personal", "chatgpt", "Personal", "personal_gpt"));
-        accounts.register(new AiAccount("gpt_work", "chatgpt", "Work", "work_gpt"));
-        accounts.register(new AiAccount("claude_personal", "claude", "Personal", "personal_claude"));
-        accounts.register(new AiAccount("claude_work", "claude", "Work", "work_claude"));
-        accounts.register(new AiAccount("gemini_personal", "gemini", "Personal", "personal_gemini"));
-        accounts.register(new AiAccount("grok_personal", "grok", "Personal", "personal_grok"));
-        accounts.register(new AiAccount("deepseek_personal", "deepseek", "Personal", "personal_deepseek"));
-
-        WorkspaceRegistry workspaces = new WorkspaceRegistry();
-        workspaces.register(new AiWorkspace("personal", "Personal", Map.of(
-                "chatgpt", "gpt_personal",
-                "claude", "claude_personal",
-                "gemini", "gemini_personal")));
-        workspaces.register(new AiWorkspace("work", "Work", Map.of(
-                "chatgpt", "gpt_work",
-                "claude", "claude_work")));
-        workspaces.register(new AiWorkspace("stale", "Stale", Map.of(
-                "chatgpt", "missing_account",
-                "claude", "gpt_personal")));
-
         RecordingSessionRuntime runtime = new RecordingSessionRuntime();
-        SessionManager sessions = new SessionManager(providers, accounts, workspaces, runtime);
+        SessionManager sessions = new SessionManager(providers, runtime);
         AiCommandBus bus = new AiCommandBus(sessions);
 
-        check(bus.execute(AiCommand.switchTo("chatgpt", null, "personal")).success(), "activate personal GPT");
-        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_personal")), "workspace account mapping");
-        check("personal".equals(sessions.activeWorkspaceId()), "workspace retained");
-        check(bus.execute(AiCommand.send("hello")).success(), "send");
+        check(bus.execute(AiCommand.switchTo("chatgpt")).success(), "activate ChatGPT");
+        check(sessions.currentKey().equals(new AiSessionKey("chatgpt")), "provider key");
+        check(bus.execute(AiCommand.send("hello")).success(), "send current provider");
 
-        // Provider-only external targeting must preserve the currently active workspace mapping.
-        check(bus.execute(AiCommand.sendTo("claude", null, null, "workspace target")).success(),
-                "provider-only send");
-        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_personal")),
-                "provider-only command keeps workspace account mapping");
-        check("personal".equals(sessions.activeWorkspaceId()),
-                "provider-only command keeps active workspace");
+        check(bus.execute(AiCommand.sendTo("claude", "provider target")).success(), "provider-targeted send");
+        check(sessions.currentKey().equals(new AiSessionKey("claude")), "provider-targeted send switches provider");
 
-        // Explicit account targeting is stronger than a workspace and intentionally exits workspace mode.
-        check(bus.execute(AiCommand.sendTo("chatgpt", "gpt_work", null, "explicit account")).success(),
-                "explicit account send");
-        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")),
-                "explicit account selected exactly");
-        check(sessions.activeWorkspaceId() == null, "explicit account exits workspace mode");
-
-        AiSessionKey beforeMismatch = sessions.currentKey();
-        check(!bus.execute(AiCommand.sendTo("claude", "gpt_work", null, "must reject")).success(),
-                "provider/account mismatch rejected");
-        check(beforeMismatch.equals(sessions.currentKey()), "rejected mismatch does not change session");
-
-        sessions.switchWorkspace("work");
-        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "workspace switch");
-        sessions.switchProvider("claude");
-        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_work")),
-                "provider switch keeps workspace");
         sessions.previousProvider();
-        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "previous provider keeps workspace");
-
-        sessions.switchWorkspace("stale");
-        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "stale workspace account falls back safely");
-        sessions.switchProvider("claude");
-        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_work")), "wrong-provider workspace account falls back safely");
+        check(sessions.currentKey().equals(new AiSessionKey("chatgpt")), "previous provider");
+        sessions.nextProvider();
+        check(sessions.currentKey().equals(new AiSessionKey("claude")), "next provider");
 
         check(bus.execute(AiCommand.simple(AiCommandType.BACK)).success(), "back");
         check(bus.execute(AiCommand.simple(AiCommandType.FORWARD)).success(), "forward");
@@ -82,33 +34,17 @@ public final class CoreSmokeTest {
         check(bus.execute(AiCommand.attachAndSend(
                 List.of("content://example/b.png"), "describe this image")).success(), "attach and send");
 
-        AiAccount renamed = sessions.renameAccount("claude_work", "Office");
-        check("Office".equals(renamed.label()), "rename account");
-        sessions.removeAccount("claude_personal");
-        check(!accounts.contains("claude_personal"), "remove non-current account");
-        check("claude_work".equals(workspaces.require("personal").accountFor("claude")),
-                "workspace remapped after account removal");
-        boolean rejectedLastAccountRemoval = false;
-        try {
-            sessions.removeAccount("claude_work");
-        } catch (IllegalStateException expected) {
-            rejectedLastAccountRemoval = true;
-        }
-        check(rejectedLastAccountRemoval, "last provider account cannot be removed");
-
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_personal:hello")), "send event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("send:claude:claude_personal:workspace target")),
-                "provider-only workspace send event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_work:explicit account")),
-                "explicit account send event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("back:claude:claude_work")), "back event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:claude:claude_work")), "forward event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("reload:claude:claude_work")), "reload event");
-        check(runtime.events().stream().anyMatch(e -> e.equals("attach:claude:claude_work:1")), "attach event");
+        sessions.switchProvider("chatgpt");
+        check(runtime.events().stream().filter(e -> e.equals("open:chatgpt")).count() == 1,
+                "retained provider session opens only once");
+        check(runtime.events().stream().anyMatch(e -> e.equals("send:chatgpt:hello")), "send event");
+        check(runtime.events().stream().anyMatch(e -> e.equals("send:claude:provider target")),
+                "provider-targeted send event");
+        check(runtime.events().stream().anyMatch(e -> e.equals("attach:claude:1")), "attach event");
         check(runtime.events().stream().anyMatch(e -> e.equals(
-                "attachAndSend:claude:claude_work:1:describe this image")), "attach and send event");
+                "attachAndSend:claude:1:describe this image")), "attach and send event");
 
-        System.out.println("AIHub core smoke test passed");
+        System.out.println("AIHub provider-only core smoke test passed");
         runtime.events().forEach(System.out::println);
     }
 
