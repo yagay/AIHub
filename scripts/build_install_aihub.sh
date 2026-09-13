@@ -11,12 +11,12 @@ OUT="${2:-out/Default}"
 SERIAL="${3:-${ANDROID_SERIAL:-}}"
 AIHUB_SOURCE="$(cd "$(dirname "$0")/.." && pwd)"
 
-"$AIHUB_SOURCE/scripts/build_aihub_chromium.sh" "$CHROMIUM_SRC" "$OUT"
+bash "$AIHUB_SOURCE/scripts/build_aihub_chromium.sh" "$CHROMIUM_SRC" "$OUT"
 
 if [[ -n "$SERIAL" ]]; then
-  "$AIHUB_SOURCE/scripts/install_aihub_local.sh" "$CHROMIUM_SRC" "$OUT" "$SERIAL"
+  bash "$AIHUB_SOURCE/scripts/install_aihub_local.sh" "$CHROMIUM_SRC" "$OUT" "$SERIAL"
 else
-  "$AIHUB_SOURCE/scripts/install_aihub_local.sh" "$CHROMIUM_SRC" "$OUT"
+  bash "$AIHUB_SOURCE/scripts/install_aihub_local.sh" "$CHROMIUM_SRC" "$OUT"
 fi
 
 echo
