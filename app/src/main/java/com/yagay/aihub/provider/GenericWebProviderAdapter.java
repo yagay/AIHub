@@ -1,5 +1,6 @@
 package com.yagay.aihub.provider;
 
+import com.yagay.aihub.model.ProviderAction;
 import com.yagay.aihub.model.ProviderSpec;
 
 import org.json.JSONArray;
@@ -23,6 +24,21 @@ public class GenericWebProviderAdapter implements AiProviderAdapter {
     @Override public JSONObject attachmentCommand() { return command("attach", null, null); }
     @Override public JSONObject presentationCommand(boolean appMode) { return command("presentation", null, appMode); }
 
+    @Override
+    public JSONObject uiActionCommand(String actionId) {
+        ProviderAction action = spec.appAction(actionId);
+        if (action == null) throw new IllegalArgumentException("Unknown APP action: " + actionId);
+        JSONObject command = command("uiAction", null, null);
+        try {
+            command.put("uiActionId", action.id());
+            command.put("actionSelectors", array(action.selectors()));
+            command.put("actionKeywords", array(action.keywords()));
+        } catch (Exception error) {
+            throw new IllegalStateException("Cannot build APP action " + actionId + " for " + spec.id(), error);
+        }
+        return command;
+    }
+
     private JSONObject command(String action, String text, Boolean appMode) {
         JSONObject command = new JSONObject();
         JSONObject selectors = new JSONObject();
@@ -36,6 +52,7 @@ public class GenericWebProviderAdapter implements AiProviderAdapter {
             selectors.put("stop", array(spec.stopSelectors()));
             selectors.put("attachment", array(spec.attachmentSelectors()));
             command.put("selectors", selectors);
+            command.put("appHide", array(spec.appHideSelectors()));
         } catch (Exception error) {
             throw new IllegalStateException("Cannot build provider command for " + spec.id(), error);
         }
