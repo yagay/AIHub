@@ -11,6 +11,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
@@ -20,9 +21,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.yagay.aihub.R;
-import com.yagay.aihub.core.AiAccount;
-import com.yagay.aihub.core.AiSessionKey;
-import com.yagay.aihub.core.AiWorkspace;
 import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.CommandResult;
@@ -32,12 +30,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
-/** Unified AI shell: every provider/account/action shares one SessionManager/AiCommandBus path. */
+/** AI-first shell: one retained Chromium/WebEngine session per provider, no account/workspace layer. */
 public final class AiHubShellActivity extends AppCompatActivity {
     private static final int REQUEST_ATTACHMENTS = 4107;
     private static final int REQUEST_EXPORT_DIAGNOSTICS = 4108;
@@ -47,9 +42,8 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private AiHubStateStore stateStore;
     private AiHubBootstrap.Graph graph;
     private WebEngineSessionRuntime runtime;
-    private Button providerButton;
-    private Button accountButton;
-    private Button workspaceButton;
+    private LinearLayout providerStrip;
+    private TextView currentAiTitle;
     private EditText composer;
     private String pendingDiagnosticsExport;
 
@@ -62,7 +56,7 @@ public final class AiHubShellActivity extends AppCompatActivity {
         runtime = new WebEngineSessionRuntime(host);
         graph = AiHubBootstrap.create(this, stateStore, runtime);
         bindViews();
-        activateInitialSession();
+        activateInitialProvider();
         handleExternalIntent(getIntent());
     }
 
@@ -94,33 +88,121 @@ public final class AiHubShellActivity extends AppCompatActivity {
     }
 
     private void bindViews() {
-        providerButton = findViewById(R.id.provider_button);
-        accountButton = findViewById(R.id.account_button);
-        workspaceButton = findViewById(R.id.workspace_button);
+        providerStrip = findViewById(R.id.provider_strip);
+        currentAiTitle = findViewById(R.id.current_ai_title);
         composer = findViewById(R.id.composer);
+
         findViewById(R.id.browser_back).setOnClickListener(v -> graph.sessions.back());
         findViewById(R.id.browser_forward).setOnClickListener(v -> graph.sessions.forward());
         findViewById(R.id.browser_reload).setOnClickListener(v -> graph.sessions.reload());
-        findViewById(R.id.previous_provider).setOnClickListener(v -> { graph.sessions.previousProvider(); onSessionChanged(); });
-        findViewById(R.id.next_provider).setOnClickListener(v -> { graph.sessions.nextProvider(); onSessionChanged(); });
-        providerButton.setOnClickListener(v -> showProviderPicker());
-        accountButton.setOnClickListener(v -> showAccountPicker());
-        workspaceButton.setOnClickListener(v -> showWorkspacePicker());
         findViewById(R.id.new_chat_button).setOnClickListener(v -> graph.sessions.newChat());
         findViewById(R.id.attach_button).setOnClickListener(v -> openAttachmentPicker());
         findViewById(R.id.stop_button).setOnClickListener(v -> graph.sessions.stop());
         findViewById(R.id.send_button).setOnClickListener(v -> sendComposer());
         findViewById(R.id.menu_button).setOnClickListener(v -> showToolsMenu());
+
         composer.setSingleLine(false);
         composer.setImeOptions(EditorInfo.IME_ACTION_SEND);
         composer.setOnEditorActionListener((v, actionId, event) -> {
             boolean keyboardSend = actionId == EditorInfo.IME_ACTION_SEND;
-            boolean hardwareSend = event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                    && event.getAction() == KeyEvent.ACTION_DOWN && !event.isShiftPressed();
+            boolean hardwareSend = event != null
+                    && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == KeyEvent.ACTION_DOWN
+                    && !event.isShiftPressed();
             if (!keyboardSend && !hardwareSend) return false;
             sendComposer();
             return true;
         });
+    }
+
+    private void activateInitialProvider() {
+        if (graph.providers.all().isEmpty()) {
+            throw new IllegalStateException("No AI providers are available");
+        }
+        String saved = stateStore.savedProviderId();
+        try {
+            if (saved != null && graph.providers.contains(saved)) graph.sessions.activate(saved);
+            else graph.sessions.activate(graph.providers.all().get(0).id());
+        } catch (RuntimeException error) {
+            graph.sessions.activate(graph.providers.all().get(0).id());
+        }
+        onSessionChanged();
+    }
+
+    private void switchProvider(String providerId) {
+        try {
+            graph.sessions.switchProvider(providerId);
+            onSessionChanged();
+        } catch (RuntimeException error) {
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void onSessionChanged() {
+        stateStore.saveCurrent(graph.sessions.currentKey());
+        ProviderConfig current = graph.providers.require(graph.sessions.currentKey().providerId());
+        currentAiTitle.setText(current.displayName());
+        rebuildProviderStrip();
+    }
+
+    private void rebuildProviderStrip() {
+        providerStrip.removeAllViews();
+        String active = graph.sessions.currentKey().providerId();
+        for (ProviderConfig provider : graph.providers.all()) {
+            Button button = new Button(this);
+            button.setAllCaps(false);
+            button.setMinWidth(0);
+            button.setText((provider.id().equals(active) ? "● " : "") + provider.displayName());
+            button.setContentDescription(getString(R.string.switch_to_ai, provider.displayName()));
+            button.setOnClickListener(v -> switchProvider(provider.id()));
+            providerStrip.addView(button, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        Button add = new Button(this);
+        add.setAllCaps(false);
+        add.setText(R.string.add_ai_short);
+        add.setOnClickListener(v -> showAddProviderDialog());
+        providerStrip.addView(add, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void showAddProviderDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, 0, pad, 0);
+        EditText name = new EditText(this);
+        name.setHint(R.string.ai_name_hint);
+        EditText url = new EditText(this);
+        url.setHint(R.string.ai_url_hint);
+        url.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        box.addView(name);
+        box.addView(url);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.add_ai_website)
+                .setView(box)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    try {
+                        ProviderConfig provider = AiHubBootstrap.addCustomProvider(
+                                graph.providers,
+                                stateStore,
+                                name.getText().toString(),
+                                url.getText().toString());
+                        switchProvider(provider.id());
+                    } catch (RuntimeException error) {
+                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void sendComposer() {
+        String text = composer.getText().toString();
+        if (text.isBlank()) return;
+        graph.sessions.sendText(text);
+        composer.setText("");
     }
 
     private void openAttachmentPicker() {
@@ -146,464 +228,12 @@ public final class AiHubShellActivity extends AppCompatActivity {
         if (uri == null || out.contains(uri.toString())) return;
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException ignored) {
-            // Some document providers grant only temporary read access; upload starts immediately.
-        }
+        } catch (SecurityException ignored) {}
         out.add(uri.toString());
-    }
-
-    private void activateInitialSession() {
-        String provider = stateStore.savedProviderId();
-        String account = stateStore.savedAccountId();
-        String workspace = stateStore.savedWorkspaceId();
-        try {
-            if (workspace != null && graph.workspaces.contains(workspace)) {
-                graph.sessions.activate(provider, null, workspace);
-            } else if (provider != null && account != null && graph.providers.contains(provider) && graph.accounts.contains(account)) {
-                graph.sessions.activate(provider, account, null);
-            } else activateFirstSession();
-        } catch (RuntimeException error) { activateFirstSession(); }
-        onSessionChanged();
-    }
-
-    private void activateFirstSession() {
-        ProviderConfig first = graph.providers.all().get(0);
-        AiAccount firstAccount = graph.accounts.forProvider(first.id()).get(0);
-        graph.sessions.activate(first.id(), firstAccount.id(), null);
-    }
-
-    private void sendComposer() {
-        String text = composer.getText().toString();
-        if (text.isBlank()) return;
-        graph.sessions.sendText(text);
-        composer.setText("");
-    }
-
-    private void showProviderPicker() {
-        List<ProviderConfig> providers = graph.providers.all();
-        String[] labels = new String[providers.size() + 1];
-        for (int i = 0; i < providers.size(); i++) labels[i] = providers.get(i).displayName();
-        labels[labels.length - 1] = getString(R.string.add_ai_website);
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.choose_ai)
-                .setItems(labels, (dialog, which) -> {
-                    if (which == providers.size()) showAddProviderDialog();
-                    else {
-                        graph.sessions.switchProvider(providers.get(which).id());
-                        onSessionChanged();
-                    }
-                }).show();
-    }
-
-    private void showAddProviderDialog() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        box.setPadding(pad, 0, pad, 0);
-        EditText name = new EditText(this);
-        name.setHint(R.string.ai_name_hint);
-        EditText url = new EditText(this);
-        url.setHint(R.string.ai_url_hint);
-        url.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        box.addView(name);
-        box.addView(url);
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.add_ai_website)
-                .setView(box)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    try {
-                        ProviderConfig provider = AiHubBootstrap.addCustomProvider(
-                                graph.providers, graph.accounts, stateStore,
-                                name.getText().toString(), url.getText().toString());
-                        AiAccount account = graph.accounts.forProvider(provider.id()).get(0);
-                        addProviderToWorkspaces(provider.id(), account.id());
-                        graph.sessions.activate(provider.id(), account.id(), graph.sessions.activeWorkspaceId());
-                        onSessionChanged();
-                    } catch (RuntimeException error) {
-                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void addProviderToWorkspaces(String providerId, String accountId) {
-        for (AiWorkspace workspace : graph.workspaces.all()) {
-            if (workspace.providerAccounts().containsKey(providerId)) continue;
-            Map<String, String> mapping = new LinkedHashMap<>(workspace.providerAccounts());
-            mapping.put(providerId, accountId);
-            graph.workspaces.register(new AiWorkspace(workspace.id(), workspace.label(), mapping));
-        }
-        stateStore.saveWorkspaces(graph.workspaces.all());
-    }
-
-    private void showAccountPicker() {
-        String providerId = graph.sessions.currentKey().providerId();
-        List<AiAccount> accounts = graph.accounts.forProvider(providerId);
-        String[] labels = new String[accounts.size() + 2];
-        for (int i = 0; i < accounts.size(); i++) labels[i] = accounts.get(i).label();
-        labels[accounts.size()] = getString(R.string.add_account);
-        labels[accounts.size() + 1] = getString(R.string.manage_accounts);
-        new AlertDialog.Builder(this).setTitle(R.string.choose_account).setItems(labels, (dialog, which) -> {
-            if (which == accounts.size()) showAddAccountDialog(providerId);
-            else if (which == accounts.size() + 1) showManageAccounts(providerId);
-            else selectAccount(accounts.get(which));
-        }).show();
-    }
-
-    private void selectAccount(AiAccount account) {
-        String workspaceId = graph.sessions.activeWorkspaceId();
-        if (workspaceId == null) graph.sessions.switchAccount(account.id());
-        else {
-            AiWorkspace old = graph.workspaces.require(workspaceId);
-            Map<String, String> mapping = new LinkedHashMap<>(old.providerAccounts());
-            mapping.put(account.providerId(), account.id());
-            graph.workspaces.register(new AiWorkspace(old.id(), old.label(), mapping));
-            stateStore.saveWorkspaces(graph.workspaces.all());
-            graph.sessions.switchWorkspace(workspaceId);
-        }
-        onSessionChanged();
-    }
-
-    private void showAddAccountDialog(String providerId) {
-        EditText label = new EditText(this);
-        label.setHint(R.string.account_name_hint);
-        new AlertDialog.Builder(this).setTitle(R.string.add_account).setView(label)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    AiAccount account = AiHubBootstrap.addAccount(graph.providers, graph.accounts, stateStore,
-                            providerId, label.getText().toString());
-                    selectAccount(account);
-                }).show();
-    }
-
-    private void showManageAccounts(String providerId) {
-        List<AiAccount> accounts = graph.accounts.forProvider(providerId);
-        String[] labels = accounts.stream().map(AiAccount::label).toArray(String[]::new);
-        new AlertDialog.Builder(this).setTitle(R.string.manage_accounts).setItems(labels,
-                (dialog, which) -> showAccountActions(accounts.get(which))).show();
-    }
-
-    private void showAccountActions(AiAccount account) {
-        String[] actions = { getString(R.string.rename_account), getString(R.string.remove_account) };
-        new AlertDialog.Builder(this).setTitle(account.label()).setItems(actions, (dialog, which) -> {
-            if (which == 0) showRenameAccountDialog(account);
-            else confirmRemoveAccount(account);
-        }).show();
-    }
-
-    private void showRenameAccountDialog(AiAccount account) {
-        EditText label = new EditText(this);
-        label.setText(account.label());
-        label.selectAll();
-        new AlertDialog.Builder(this).setTitle(R.string.rename_account).setView(label)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    try {
-                        graph.sessions.renameAccount(account.id(), label.getText().toString());
-                        stateStore.saveAccounts(graph.accounts.all());
-                        onSessionChanged();
-                    } catch (RuntimeException error) {
-                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void confirmRemoveAccount(AiAccount account) {
-        new AlertDialog.Builder(this).setTitle(R.string.remove_account)
-                .setMessage(R.string.remove_account_warning)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    try {
-                        graph.sessions.removeAccount(account.id());
-                        stateStore.saveAccounts(graph.accounts.all());
-                        stateStore.saveWorkspaces(graph.workspaces.all());
-                        onSessionChanged();
-                    } catch (RuntimeException error) {
-                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void showWorkspacePicker() {
-        List<AiWorkspace> workspaces = graph.workspaces.all();
-        String[] labels = new String[workspaces.size() + 3];
-        labels[0] = getString(R.string.no_workspace);
-        for (int i = 0; i < workspaces.size(); i++) labels[i + 1] = workspaces.get(i).label();
-        labels[workspaces.size() + 1] = getString(R.string.create_workspace);
-        labels[workspaces.size() + 2] = getString(R.string.manage_workspaces);
-        new AlertDialog.Builder(this).setTitle(R.string.choose_workspace).setItems(labels, (dialog, which) -> {
-            if (which == 0) {
-                graph.sessions.clearWorkspace();
-                stateStore.saveWorkspaceId(null);
-                onSessionChanged();
-            } else if (which == workspaces.size() + 1) showCreateWorkspaceDialog();
-            else if (which == workspaces.size() + 2) showManageWorkspaces();
-            else {
-                graph.sessions.switchWorkspace(workspaces.get(which - 1).id());
-                onSessionChanged();
-            }
-        }).show();
-    }
-
-    private void showCreateWorkspaceDialog() {
-        EditText label = new EditText(this);
-        label.setHint(R.string.workspace_name_hint);
-        new AlertDialog.Builder(this).setTitle(R.string.create_workspace).setView(label)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    String name = label.getText().toString().trim();
-                    if (name.isEmpty()) name = getString(R.string.workspace_default_name);
-                    Map<String, String> mapping = new LinkedHashMap<>();
-                    for (ProviderConfig provider : graph.providers.all()) {
-                        mapping.put(provider.id(), graph.sessions.preferredAccountId(provider.id()));
-                    }
-                    String id = "workspace:" + UUID.randomUUID().toString().replace("-", "");
-                    graph.workspaces.register(new AiWorkspace(id, name, mapping));
-                    stateStore.saveWorkspaces(graph.workspaces.all());
-                    graph.sessions.switchWorkspace(id);
-                    onSessionChanged();
-                }).show();
-    }
-
-    private void showManageWorkspaces() {
-        List<AiWorkspace> workspaces = graph.workspaces.all();
-        if (workspaces.isEmpty()) {
-            Toast.makeText(this, R.string.no_workspace_short, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        String[] labels = workspaces.stream().map(AiWorkspace::label).toArray(String[]::new);
-        new AlertDialog.Builder(this).setTitle(R.string.manage_workspaces).setItems(labels,
-                (dialog, which) -> showWorkspaceActions(workspaces.get(which))).show();
-    }
-
-    private void showWorkspaceActions(AiWorkspace workspace) {
-        String[] actions = { getString(R.string.rename_workspace), getString(R.string.delete_workspace) };
-        new AlertDialog.Builder(this).setTitle(workspace.label()).setItems(actions, (dialog, which) -> {
-            if (which == 0) showRenameWorkspaceDialog(workspace);
-            else confirmDeleteWorkspace(workspace);
-        }).show();
-    }
-
-    private void showRenameWorkspaceDialog(AiWorkspace workspace) {
-        EditText label = new EditText(this);
-        label.setText(workspace.label());
-        label.selectAll();
-        new AlertDialog.Builder(this).setTitle(R.string.rename_workspace).setView(label)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    try {
-                        graph.sessions.renameWorkspace(workspace.id(), label.getText().toString());
-                        stateStore.saveWorkspaces(graph.workspaces.all());
-                        onSessionChanged();
-                    } catch (RuntimeException error) {
-                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void confirmDeleteWorkspace(AiWorkspace workspace) {
-        new AlertDialog.Builder(this).setTitle(R.string.delete_workspace).setMessage(workspace.label())
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    graph.sessions.removeWorkspace(workspace.id());
-                    stateStore.saveWorkspaces(graph.workspaces.all());
-                    stateStore.saveWorkspaceId(graph.sessions.activeWorkspaceId());
-                    onSessionChanged();
-                }).show();
-    }
-
-    private void showToolsMenu() {
-        String[] items = {
-                getString(R.string.provider_diagnostics),
-                getString(R.string.export_diagnostics),
-                getString(R.string.import_signed_rules),
-                getString(R.string.rollback_rules),
-                getString(R.string.integration_token),
-                getString(R.string.rotate_token),
-                getString(R.string.rule_warnings),
-                getString(R.string.current_url)
-        };
-        new AlertDialog.Builder(this).setTitle(R.string.tools).setItems(items, (dialog, which) -> {
-            switch (which) {
-                case 0 -> showProviderDiagnostics();
-                case 1 -> exportDiagnostics();
-                case 2 -> openSignedRulesPicker();
-                case 3 -> rollbackSignedRules();
-                case 4 -> showIntegrationToken(false);
-                case 5 -> confirmRotateToken();
-                case 6 -> showRuleWarnings();
-                case 7 -> showCurrentUrl();
-                default -> { }
-            }
-        }).show();
-    }
-
-    private void showProviderDiagnostics() {
-        Futures.addCallback(AiHubDiagnostics.snapshot(graph, runtime), new FutureCallback<>() {
-            @Override public void onSuccess(String result) {
-                showCopyDialog(getString(R.string.provider_diagnostics), result == null ? "{}" : result);
-            }
-            @Override public void onFailure(Throwable error) {
-                Toast.makeText(AiHubShellActivity.this,
-                        error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
-                        Toast.LENGTH_LONG).show();
-            }
-        }, getMainExecutor());
-    }
-
-    private void exportDiagnostics() {
-        Futures.addCallback(AiHubDiagnostics.snapshot(graph, runtime), new FutureCallback<>() {
-            @Override public void onSuccess(String result) {
-                pendingDiagnosticsExport = result == null ? "{}" : result;
-                Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                        .addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType("application/json")
-                        .putExtra(Intent.EXTRA_TITLE, "aihub-diagnostics.json");
-                startActivityForResult(create, REQUEST_EXPORT_DIAGNOSTICS);
-            }
-            @Override public void onFailure(Throwable error) {
-                Toast.makeText(AiHubShellActivity.this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
-            }
-        }, getMainExecutor());
-    }
-
-    private void writeDiagnostics(Uri uri) {
-        String text = pendingDiagnosticsExport;
-        pendingDiagnosticsExport = null;
-        if (text == null) return;
-        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
-            if (output == null) throw new IllegalStateException("No output stream");
-            output.write(text.getBytes(StandardCharsets.UTF_8));
-            output.flush();
-            Toast.makeText(this, R.string.diagnostics_saved, Toast.LENGTH_SHORT).show();
-        } catch (Exception error) {
-            Toast.makeText(this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void openSignedRulesPicker() {
-        SignedProviderRuleBundle signed = new SignedProviderRuleBundle(this, stateStore);
-        if (!signed.isConfigured()) {
-            Toast.makeText(this,
-                    getString(R.string.rules_update_failed, "no Ed25519 public key configured"),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .addCategory(Intent.CATEGORY_OPENABLE)
-                .setType("application/json")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        startActivityForResult(picker, REQUEST_IMPORT_SIGNED_RULES);
-    }
-
-    private void importSignedRules(Uri uri) {
-        try {
-            String envelope = readSmallTextFile(uri, MAX_RULE_BUNDLE_BYTES);
-            SignedProviderRuleBundle.Verified verified =
-                    new SignedProviderRuleBundle(this, stateStore).install(envelope);
-            reloadGraphAfterRuleChange();
-            Toast.makeText(this, getString(R.string.rules_installed, verified.version()), Toast.LENGTH_LONG).show();
-        } catch (Exception error) {
-            Toast.makeText(this,
-                    getString(R.string.rules_update_failed,
-                            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()),
-                    Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void rollbackSignedRules() {
-        try {
-            SignedProviderRuleBundle signed = new SignedProviderRuleBundle(this, stateStore);
-            if (!signed.rollback()) {
-                Toast.makeText(this, R.string.no_rules_rollback, Toast.LENGTH_LONG).show();
-                return;
-            }
-            reloadGraphAfterRuleChange();
-            Toast.makeText(this, R.string.rules_rolled_back, Toast.LENGTH_LONG).show();
-        } catch (Exception error) {
-            Toast.makeText(this,
-                    getString(R.string.rules_update_failed,
-                            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()),
-                    Toast.LENGTH_LONG).show();
-        }
-    }
-
-    private void reloadGraphAfterRuleChange() {
-        AiSessionKey oldKey = graph.sessions.currentKey();
-        String oldWorkspace = graph.sessions.activeWorkspaceId();
-        graph = AiHubBootstrap.create(this, stateStore, runtime);
-        try {
-            if (oldWorkspace != null && graph.workspaces.contains(oldWorkspace)
-                    && graph.providers.contains(oldKey.providerId())) {
-                graph.sessions.activate(oldKey.providerId(), null, oldWorkspace);
-            } else if (graph.providers.contains(oldKey.providerId()) && graph.accounts.contains(oldKey.accountId())) {
-                graph.sessions.activate(oldKey.providerId(), oldKey.accountId(), null);
-            } else {
-                activateFirstSession();
-            }
-        } catch (RuntimeException error) {
-            activateFirstSession();
-        }
-        onSessionChanged();
-    }
-
-    private String readSmallTextFile(Uri uri, int maxBytes) throws Exception {
-        try (InputStream input = getContentResolver().openInputStream(uri)) {
-            if (input == null) throw new IllegalArgumentException("Cannot open selected file");
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            byte[] buffer = new byte[16 * 1024];
-            int total = 0;
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                total += read;
-                if (total > maxBytes) throw new IllegalArgumentException("Rule bundle exceeds 2 MiB limit");
-                output.write(buffer, 0, read);
-            }
-            return output.toString(StandardCharsets.UTF_8);
-        }
-    }
-
-    private void showCurrentUrl() {
-        Futures.addCallback(runtime.currentUrl(graph.sessions.currentKey()), new FutureCallback<>() {
-            @Override public void onSuccess(String url) { showCopyDialog(getString(R.string.current_url), url); }
-            @Override public void onFailure(Throwable error) { }
-        }, getMainExecutor());
-    }
-
-    private void showIntegrationToken(boolean rotated) {
-        showCopyDialog(rotated ? getString(R.string.token_rotated) : getString(R.string.integration_token),
-                stateStore.clientToken());
-    }
-
-    private void confirmRotateToken() {
-        new AlertDialog.Builder(this).setTitle(R.string.rotate_token).setMessage(R.string.rotate_token_warning)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    stateStore.rotateClientToken();
-                    showIntegrationToken(true);
-                }).show();
-    }
-
-    private void showRuleWarnings() {
-        String message = graph.providerWarnings.isEmpty() ? getString(R.string.no_rule_warnings)
-                : String.join("\n", graph.providerWarnings);
-        new AlertDialog.Builder(this).setTitle(R.string.rule_warnings).setMessage(message)
-                .setPositiveButton(android.R.string.ok, null).show();
-    }
-
-    private void showCopyDialog(String title, String value) {
-        new AlertDialog.Builder(this).setTitle(title).setMessage(value == null ? "" : value)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.copy, (dialog, which) -> {
-                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    clipboard.setPrimaryClip(ClipData.newPlainText(title, value == null ? "" : value));
-                    Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show();
-                }).show();
     }
 
     private void handleExternalIntent(Intent intent) {
         if (intent == null || !intent.getBooleanExtra(AiHubEntryActivity.EXTRA_INTERNAL_DISPATCH, false)) return;
-        // Consume before execution so configuration-change recreation cannot repeat the command.
         intent.removeExtra(AiHubEntryActivity.EXTRA_INTERNAL_DISPATCH);
         AiCommand command = AiHubExternalCommandParser.parse(intent, stateStore.clientToken());
         if (command == null) return;
@@ -615,16 +245,177 @@ public final class AiHubShellActivity extends AppCompatActivity {
         onSessionChanged();
     }
 
-    private void onSessionChanged() {
-        AiSessionKey key = graph.sessions.currentKey();
-        ProviderConfig provider = graph.providers.require(key.providerId());
-        AiAccount account = graph.accounts.require(key.accountId());
-        providerButton.setText(provider.displayName());
-        accountButton.setText(account.label());
-        String workspaceId = graph.sessions.activeWorkspaceId();
-        workspaceButton.setText(workspaceId == null ? getString(R.string.no_workspace_short)
-                : graph.workspaces.require(workspaceId).label());
-        stateStore.saveCurrent(key);
-        stateStore.saveWorkspaceId(workspaceId);
+    private void showToolsMenu() {
+        String[] items = {
+                getString(R.string.current_url),
+                getString(R.string.provider_diagnostics),
+                getString(R.string.export_diagnostics),
+                getString(R.string.import_signed_rules),
+                getString(R.string.rollback_rules),
+                getString(R.string.integration_token),
+                getString(R.string.rotate_token),
+                getString(R.string.rule_warnings)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.tools)
+                .setItems(items, (dialog, which) -> {
+                    switch (which) {
+                        case 0 -> showCurrentUrl();
+                        case 1 -> showProviderDiagnostics();
+                        case 2 -> exportDiagnostics();
+                        case 3 -> openSignedRulePicker();
+                        case 4 -> rollbackRules();
+                        case 5 -> showToken(stateStore.clientToken());
+                        case 6 -> confirmRotateToken();
+                        case 7 -> showRuleWarnings();
+                        default -> { }
+                    }
+                }).show();
+    }
+
+    private void showCurrentUrl() {
+        Futures.addCallback(runtime.currentUrl(graph.sessions.currentKey()), new FutureCallback<>() {
+            @Override public void onSuccess(String url) { showCopyDialog(getString(R.string.current_url), url); }
+            @Override public void onFailure(Throwable error) { showError(error); }
+        }, getMainExecutor());
+    }
+
+    private void showProviderDiagnostics() {
+        Futures.addCallback(runtime.probe(graph.sessions.currentKey()), new FutureCallback<>() {
+            @Override public void onSuccess(String value) {
+                new AlertDialog.Builder(AiHubShellActivity.this)
+                        .setTitle(R.string.provider_diagnostics)
+                        .setMessage(value == null ? "" : value)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            }
+            @Override public void onFailure(Throwable error) { showError(error); }
+        }, getMainExecutor());
+    }
+
+    private void exportDiagnostics() {
+        Futures.addCallback(AiHubDiagnostics.snapshot(graph, runtime), new FutureCallback<>() {
+            @Override public void onSuccess(String json) {
+                pendingDiagnosticsExport = json;
+                Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("application/json")
+                        .putExtra(Intent.EXTRA_TITLE, "aihub-diagnostics.json");
+                startActivityForResult(create, REQUEST_EXPORT_DIAGNOSTICS);
+            }
+            @Override public void onFailure(Throwable error) { showError(error); }
+        }, getMainExecutor());
+    }
+
+    private void writeDiagnostics(Uri uri) {
+        String value = pendingDiagnosticsExport;
+        pendingDiagnosticsExport = null;
+        if (value == null) return;
+        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+            if (output == null) throw new IllegalStateException("Cannot open output");
+            output.write(value.getBytes(StandardCharsets.UTF_8));
+            Toast.makeText(this, R.string.diagnostics_saved, Toast.LENGTH_SHORT).show();
+        } catch (Exception error) {
+            Toast.makeText(this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openSignedRulePicker() {
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/json");
+        startActivityForResult(picker, REQUEST_IMPORT_SIGNED_RULES);
+    }
+
+    private void importSignedRules(Uri uri) {
+        try {
+            String envelope = readUtf8(uri, MAX_RULE_BUNDLE_BYTES);
+            SignedProviderRuleBundle.Verified verified = new SignedProviderRuleBundle(this, stateStore).install(envelope);
+            reloadProviderGraph();
+            Toast.makeText(this, getString(R.string.rules_installed, verified.version()), Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            Toast.makeText(this, getString(R.string.rules_update_failed, error.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void rollbackRules() {
+        try {
+            if (!new SignedProviderRuleBundle(this, stateStore).rollback()) {
+                Toast.makeText(this, R.string.no_rules_rollback, Toast.LENGTH_LONG).show();
+                return;
+            }
+            reloadProviderGraph();
+            Toast.makeText(this, R.string.rules_rolled_back, Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            Toast.makeText(this, getString(R.string.rules_update_failed, error.getMessage()), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void reloadProviderGraph() {
+        String preferred = graph.sessions.currentKey().providerId();
+        graph = AiHubBootstrap.create(this, stateStore, runtime);
+        if (graph.providers.contains(preferred)) graph.sessions.activate(preferred);
+        else graph.sessions.activate(graph.providers.all().get(0).id());
+        onSessionChanged();
+    }
+
+    private void showRuleWarnings() {
+        String message = graph.providerWarnings.isEmpty()
+                ? getString(R.string.no_rule_warnings)
+                : String.join("\n\n", graph.providerWarnings);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rule_warnings)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    private void showToken(String token) {
+        showCopyDialog(getString(R.string.integration_token), token);
+    }
+
+    private void confirmRotateToken() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rotate_token)
+                .setMessage(R.string.rotate_token_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) ->
+                        showCopyDialog(getString(R.string.token_rotated), stateStore.rotateClientToken()))
+                .show();
+    }
+
+    private void showCopyDialog(String title, String value) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(value == null ? "" : value)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.copy, (dialog, which) -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    clipboard.setPrimaryClip(ClipData.newPlainText(title, value));
+                    Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show();
+                }).show();
+    }
+
+    private String readUtf8(Uri uri, int maxBytes) throws Exception {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalArgumentException("Cannot open selected file");
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] block = new byte[16 * 1024];
+            int total = 0;
+            int read;
+            while ((read = input.read(block)) != -1) {
+                total += read;
+                if (total > maxBytes) throw new IllegalArgumentException("Selected file is too large");
+                out.write(block, 0, read);
+            }
+            return out.toString(StandardCharsets.UTF_8);
+        }
+    }
+
+    private void showError(Throwable error) {
+        String message = error == null || error.getMessage() == null
+                ? getString(R.string.operation_failed)
+                : error.getMessage();
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 }
