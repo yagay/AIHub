@@ -66,7 +66,7 @@ public final class SessionManager {
     public synchronized String preferredAccountId(String providerId) {
         providers.require(providerId);
         String id = lastAccountByProvider.get(providerId);
-        if (id != null && accounts.contains(id)) return id;
+        if (validAccountForProvider(id, providerId)) return id;
         List<AiAccount> candidates = accounts.forProvider(providerId);
         if (candidates.isEmpty()) throw new IllegalStateException("No account registered for provider: " + providerId);
         return candidates.get(0).id();
@@ -134,12 +134,22 @@ public final class SessionManager {
         providers.require(p);
 
         String a = accountId;
-        if ((a == null || a.isBlank()) && workspaceId != null && !workspaceId.isBlank()) {
-            a = workspaces.require(workspaceId).accountFor(p);
+        if (!validAccountForProvider(a, p)) a = null;
+        if (a == null && workspaceId != null && !workspaceId.isBlank()) {
+            String workspaceAccount = workspaces.require(workspaceId).accountFor(p);
+            if (validAccountForProvider(workspaceAccount, p)) a = workspaceAccount;
         }
-        if (a == null || a.isBlank()) a = lastAccountByProvider.get(p);
-        if (a == null || a.isBlank()) a = preferredAccountId(p);
+        if (a == null) {
+            String previous = lastAccountByProvider.get(p);
+            if (validAccountForProvider(previous, p)) a = previous;
+        }
+        if (a == null) a = preferredAccountId(p);
         return new AiSessionKey(p, a);
+    }
+
+    private boolean validAccountForProvider(String accountId, String providerId) {
+        if (accountId == null || accountId.isBlank() || !accounts.contains(accountId)) return false;
+        return providerId.equals(accounts.require(accountId).providerId());
     }
 
     private String firstProviderId() {
