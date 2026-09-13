@@ -3,8 +3,11 @@ import argparse
 import pathlib
 import sys
 
+# Keep this list synchronized with the direct upstream calls in AiWebEngineHost.java. If a future
+# Chromium revision changes these APIs, the compatibility check should fail before GN compilation.
 REQUIRED_FILES = {
     "Tab": "weblayer/public/java/org/chromium/webengine/Tab.java",
+    "NavigationController": "weblayer/public/java/org/chromium/webengine/NavigationController.java",
     "FragmentParams": "weblayer/public/java/org/chromium/webengine/FragmentParams.java",
     "WebSandbox": "weblayer/public/java/org/chromium/webengine/WebSandbox.java",
     "TabManager": "weblayer/public/java/org/chromium/webengine/TabManager.java",
@@ -13,14 +16,18 @@ REQUIRED_FILES = {
 
 REQUIRED_SYMBOLS = {
     "Tab": ["executeScript(", "getNavigationController(", "setActive(", "getDisplayUri("],
+    "NavigationController": ["navigate(", "goBack(", "goForward(", "reload("],
     "FragmentParams": ["setProfileName(", "setPersistenceId("],
     "WebSandbox": ["create(", "createFragment("],
     "TabManager": ["getActiveTab(", "createTab("],
+    "WebFragment": ["getTabManager("],
 }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Check a Chromium src checkout against AIHub WebEngine usage")
+    parser = argparse.ArgumentParser(
+        description="Check a Chromium src checkout against the exact WebEngine surface AIHub uses"
+    )
     parser.add_argument("chromium_src", help="Path to Chromium src directory")
     args = parser.parse_args()
     root = pathlib.Path(args.chromium_src).resolve()
@@ -67,11 +74,16 @@ def main():
         print("AIHub Chromium compatibility check FAILED:")
         for error in errors:
             print(" -", error)
-        print("\nAdapt only chromium-overlay/ to the selected Chromium revision; keep aihub-core unchanged.")
+        print("\nExpected maintenance boundary:")
+        print("  1. chromium-overlay/java/com/yagay/aihub/chromium/AiWebEngineHost.java")
+        print("  2. chromium-overlay/BUILD.gn if upstream target names move")
+        print("  3. this compatibility checker")
+        print("Keep aihub-core, AI UI and provider rules independent from Chromium revision changes.")
         sys.exit(1)
 
     print("AIHub Chromium compatibility check passed")
     print(f"checkout: {root}")
+    print("direct Chromium Java seam: AiWebEngineHost.java")
     print("expected target: //aihub/chromium-overlay:aihub_local")
 
 
