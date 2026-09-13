@@ -111,27 +111,21 @@ public final class SessionManager {
         return currentOrNull();
     }
 
-    public synchronized AiWorkspace renameWorkspace(String workspaceId, String newLabel) {
-        AiWorkspace old = workspaces.require(workspaceId);
-        String label = newLabel == null ? "" : newLabel.trim();
-        if (label.isEmpty()) throw new IllegalArgumentException("Workspace name is required");
-        AiWorkspace renamed = new AiWorkspace(old.id(), label, old.providerAccounts());
-        workspaces.register(renamed);
-        return renamed;
-    }
-
-    public synchronized void removeWorkspace(String workspaceId) {
-        workspaces.require(workspaceId);
-        workspaces.remove(workspaceId);
-        if (workspaceId.equals(activeWorkspaceId)) activeWorkspaceId = null;
-    }
-
     public synchronized AiSession switchProvider(String providerId) {
         return activate(providerId, null, activeWorkspaceId);
     }
 
     public synchronized AiSession switchAccount(String accountId) {
+        return switchAccount(null, accountId);
+    }
+
+    /** Explicit account selection always exits workspace mode and validates an optional provider hint. */
+    public synchronized AiSession switchAccount(String providerId, String accountId) {
         AiAccount account = accounts.require(accountId);
+        if (providerId != null && !providerId.isBlank() && !providerId.equals(account.providerId())) {
+            throw new IllegalArgumentException(
+                    "Account " + account.id() + " does not belong to " + providerId);
+        }
         activeWorkspaceId = null;
         return activate(account.providerId(), account.id(), null);
     }
@@ -143,7 +137,31 @@ public final class SessionManager {
         return activate(providerId, null, workspaceId);
     }
 
+    public synchronized AiSession switchWorkspace(String workspaceId, String providerId) {
+        workspaces.require(workspaceId);
+        activeWorkspaceId = workspaceId;
+        return activate(providerId, null, workspaceId);
+    }
+
     public synchronized void clearWorkspace() { activeWorkspaceId = null; }
+
+    public synchronized AiWorkspace renameWorkspace(String workspaceId, String newLabel) {
+        AiWorkspace old = workspaces.require(workspaceId);
+        String label = newLabel == null ? "" : newLabel.trim();
+        if (label.isEmpty()) throw new IllegalArgumentException("Workspace name is required");
+        AiWorkspace renamed = new AiWorkspace(old.id(), label, old.providerAccounts());
+        workspaces.register(renamed);
+        return renamed;
+    }
+
+    public synchronized boolean removeWorkspace(String workspaceId) {
+        workspaces.require(workspaceId);
+        boolean active = workspaceId.equals(activeWorkspaceId);
+        boolean removed = workspaces.remove(workspaceId);
+        if (active) activeWorkspaceId = null;
+        return removed;
+    }
+
     public synchronized AiSession nextProvider() { return moveProvider(1); }
     public synchronized AiSession previousProvider() { return moveProvider(-1); }
 
