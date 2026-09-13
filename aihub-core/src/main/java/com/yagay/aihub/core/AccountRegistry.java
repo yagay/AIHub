@@ -12,10 +12,18 @@ public final class AccountRegistry {
         byId.put(account.id(), account);
     }
 
+    public synchronized boolean contains(String id) {
+        return byId.containsKey(id);
+    }
+
     public synchronized AiAccount require(String id) {
         AiAccount account = byId.get(id);
         if (account == null) throw new IllegalArgumentException("Unknown account: " + id);
         return account;
+    }
+
+    public synchronized List<AiAccount> all() {
+        return new ArrayList<>(byId.values());
     }
 
     public synchronized List<AiAccount> forProvider(String providerId) {
@@ -24,5 +32,9 @@ public final class AccountRegistry {
             if (account.providerId().equals(providerId)) out.add(account);
         }
         return out;
+    }
+
+    public synchronized boolean remove(String id) {
+        return byId.remove(id) != null;
     }
 }
