@@ -75,11 +75,21 @@ else:
 
 contract = (ROOT / "android-api/src/main/java/com/yagay/aihub/api/AiHubContract.java").read_text(encoding="utf-8")
 parser = (java_root / "AiHubExternalCommandParser.java").read_text(encoding="utf-8")
+entry_source = (java_root / "AiHubEntryActivity.java").read_text(encoding="utf-8")
 for action in re.findall(r'public static final String (ACTION_[A-Z_]+) =', contract):
     if action == "ACTION_BIND_SERVICE":
         continue
     if action not in parser:
         errors.append(f"External command parser does not handle {action}")
+
+# Reusable automation credentials must never be placed in a deep-link URL. Deep links are
+# tokenless and user-confirmed; unattended automation uses Intent extras or Binder.
+if re.search(r'getQueryParameter\s*\(\s*"token"\s*\)', parser):
+    errors.append("Deep links must not read the client token from URL query parameters")
+if "Intent.ACTION_VIEW" not in entry_source or "link_confirm_message" not in entry_source:
+    errors.append("AiHubEntryActivity must explicitly confirm deep-link ACTION_VIEW requests")
+if "onNewIntent" not in entry_source:
+    errors.append("AiHubEntryActivity must revalidate singleTop requests in onNewIntent")
 
 install_script = (ROOT / "scripts/install_aihub_local.sh").read_text(encoding="utf-8")
 if "AiHubShellActivity" in install_script:
