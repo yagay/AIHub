@@ -16,13 +16,27 @@ import io.github.libxposed.api.XposedModule;
 public final class TitaniumXposedModule extends XposedModule {
     private static final String TAG = "AIHub-Titanium";
 
+    private volatile boolean hooksInstalled;
+    private String extensionDestination;
+
     @Override
     @RequiresApi(Build.VERSION_CODES.Q)
     public void onPackageLoaded(@NonNull PackageLoadedParam param) {
-        if (!TitaniumManager.PACKAGE.equals(param.getPackageName())) return;
+        if (!TitaniumManager.PACKAGE.equals(param.getPackageName()) || !param.isFirstPackage()) return;
+        extensionDestination = param.getApplicationInfo().dataDir + TitaniumManager.EXTENSION_RELATIVE_PATH;
+        installHooks(param.getDefaultClassLoader());
+    }
 
+    @Override
+    public void onPackageReady(@NonNull PackageReadyParam param) {
+        if (!TitaniumManager.PACKAGE.equals(param.getPackageName()) || hooksInstalled) return;
+        extensionDestination = param.getApplicationInfo().dataDir + TitaniumManager.EXTENSION_RELATIVE_PATH;
+        installHooks(param.getClassLoader());
+    }
+
+    private synchronized void installHooks(ClassLoader loader) {
+        if (hooksInstalled || extensionDestination == null) return;
         try {
-            ClassLoader loader = param.getDefaultClassLoader();
             Class<?> commandLine = Class.forName("org.chromium.base.CommandLine", false, loader);
             Method init = commandLine.getDeclaredMethod("init", String[].class);
             Method switchToNative = commandLine.getDeclaredMethod("switchToNativeImpl");
@@ -38,6 +52,8 @@ public final class TitaniumXposedModule extends XposedModule {
                 return chain.proceed();
             });
 
+            hooksInstalled = true;
+
             // If Chromium initialized unusually early, inject immediately as well.
             try {
                 Method initialized = commandLine.getDeclaredMethod("isInitialized");
@@ -46,7 +62,7 @@ public final class TitaniumXposedModule extends XposedModule {
 
             log(Log.INFO, TAG, "Titanium CommandLine hooks installed");
         } catch (Throwable error) {
-            log(Log.ERROR, TAG, "Failed to install Titanium extension hook", error);
+            log(Log.ERROR, TAG, "Titanium CommandLine not ready yet", error);
         }
     }
 
@@ -58,10 +74,11 @@ public final class TitaniumXposedModule extends XposedModule {
         Method appendSwitch = commandLine.getDeclaredMethod("appendSwitchWithValue", String.class, String.class);
 
         String existing = (String) getSwitchValue.invoke(instance, "load-extension");
-        String destination = TitaniumManager.EXTENSION_DEST;
+        String destination = extensionDestination;
+        if (destination == null || destination.trim().isEmpty()) return;
         if (existing != null && existing.contains(destination)) return;
 
-        String merged = existing == null || existing.isBlank()
+        String merged = existing == null || existing.trim().isEmpty()
                 ? destination
                 : existing + "," + destination;
         if (existing != null) removeSwitch.invoke(instance, "load-extension");
