@@ -1,2 +1,2 @@
-rootProject.name = "AIHub-Chromium-Starter"
+rootProject.name = "AIHub"
 include(":aihub-core")
