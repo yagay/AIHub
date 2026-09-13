@@ -11,7 +11,7 @@ import com.yagay.aihub.core.command.AiCommandType;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Converts Android intents/deep links/share intents into the same AiCommand used by the app UI. */
+/** Converts Android intents/deep links/share intents into the same provider-only AiCommand. */
 public final class AiHubExternalCommandParser {
     private AiHubExternalCommandParser() {}
 
@@ -31,9 +31,6 @@ public final class AiHubExternalCommandParser {
             return null;
         }
 
-        // Deep links are intentionally user-mediated by AiHubEntryActivity and therefore carry no
-        // reusable client secret in the URL. Unattended automation must use token-gated Intent
-        // extras or Binder instead.
         if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
             return parseDeepLink(intent.getData());
         }
@@ -44,18 +41,11 @@ public final class AiHubExternalCommandParser {
         }
 
         String provider = intent.getStringExtra(AiHubContract.EXTRA_PROVIDER_ID);
-        String account = intent.getStringExtra(AiHubContract.EXTRA_ACCOUNT_ID);
-        String workspace = intent.getStringExtra(AiHubContract.EXTRA_WORKSPACE_ID);
-
         if (AiHubContract.ACTION_SWITCH.equals(action)) {
-            return AiCommand.switchTo(provider, account, workspace);
+            return AiCommand.switchTo(provider);
         }
         if (AiHubContract.ACTION_SEND_TEXT.equals(action)) {
-            return AiCommand.sendTo(
-                    provider,
-                    account,
-                    workspace,
-                    intent.getStringExtra(AiHubContract.EXTRA_TEXT));
+            return AiCommand.sendTo(provider, intent.getStringExtra(AiHubContract.EXTRA_TEXT));
         }
         if (AiHubContract.ACTION_ATTACH.equals(action)) {
             ArrayList<String> uris = intent.getStringArrayListExtra(AiHubContract.EXTRA_URI_LIST);
@@ -78,25 +68,19 @@ public final class AiHubExternalCommandParser {
 
     private static AiCommand parseDeepLink(Uri uri) {
         if (!AiHubContract.DEEP_LINK_SCHEME.equals(uri.getScheme())) return null;
-
         String command = uri.getHost();
         if ((command == null || command.isBlank()) && !uri.getPathSegments().isEmpty()) {
             command = uri.getPathSegments().get(0);
         }
         String provider = uri.getQueryParameter("provider");
-        String account = uri.getQueryParameter("account");
-        String workspace = uri.getQueryParameter("workspace");
-
         if ("send".equals(command)) {
             String text = uri.getQueryParameter("text");
             if (text == null || text.isBlank()) return null;
-            return AiCommand.sendTo(provider, account, workspace, text);
+            return AiCommand.sendTo(provider, text);
         }
         if ("switch".equals(command)) {
-            if ((provider == null || provider.isBlank())
-                    && (account == null || account.isBlank())
-                    && (workspace == null || workspace.isBlank())) return null;
-            return AiCommand.switchTo(provider, account, workspace);
+            if (provider == null || provider.isBlank()) return null;
+            return AiCommand.switchTo(provider);
         }
         if ("new-chat".equals(command)) return AiCommand.simple(AiCommandType.NEW_CHAT);
         if ("stop".equals(command)) return AiCommand.simple(AiCommandType.STOP);
