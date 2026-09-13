@@ -25,4 +25,8 @@ public final class WorkspaceRegistry {
     public synchronized List<AiWorkspace> all() {
         return new ArrayList<>(byId.values());
     }
+
+    public synchronized boolean remove(String id) {
+        return byId.remove(id) != null;
+    }
 }
