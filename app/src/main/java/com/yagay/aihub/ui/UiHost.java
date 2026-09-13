@@ -142,6 +142,7 @@ public final class UiHost {
     public void showStatus(String text, boolean sticky) {
         activity.runOnUiThread(() -> {
             stickyStatus = sticky;
+            status.setOnClickListener(null);
             status.setText(text == null ? "" : text);
             status.setVisibility(View.VISIBLE);
         });
@@ -150,11 +151,26 @@ public final class UiHost {
     public void showTransientStatus(String text) {
         activity.runOnUiThread(() -> {
             stickyStatus = false;
+            status.setOnClickListener(null);
             status.setText(text == null ? "" : text);
             status.setVisibility(View.VISIBLE);
             main.postDelayed(() -> {
                 if (!stickyStatus && pageReady) status.setVisibility(View.GONE);
             }, 1200);
+        });
+    }
+
+    /** Non-fatal setup warning: the web UI remains usable after tapping through. */
+    public void showDismissibleWarning(String text) {
+        activity.runOnUiThread(() -> {
+            stickyStatus = true;
+            status.setText((text == null ? "" : text) + "\n\n点击继续使用 AIHub");
+            status.setVisibility(View.VISIBLE);
+            status.setOnClickListener(v -> {
+                stickyStatus = false;
+                status.setOnClickListener(null);
+                status.setVisibility(View.GONE);
+            });
         });
     }
 
