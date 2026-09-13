@@ -104,13 +104,19 @@ for root in (core_root, java_root, api_root):
             if forbidden in text:
                 errors.append(f"Provider-only source still contains {forbidden}: {path.relative_to(ROOT)}")
 
-# Chromium API churn must remain behind exactly two adapter files.
-allowed_chromium_importers = {"AiWebEngineHost.java", "WebEngineSessionRuntime.java"}
+# Direct Chromium/WebEngine Java API usage is allowed in exactly one file. WebEngineSessionRuntime
+# is deliberately API-neutral so normal AIHub changes do not depend on an upstream Chromium revision.
 for java_file in java_root.glob("*.java"):
     text = java_file.read_text(encoding="utf-8")
-    if "org.chromium.webengine" in text and java_file.name not in allowed_chromium_importers:
+    if "org.chromium.webengine" in text and java_file.name != "AiWebEngineHost.java":
         errors.append(
-            f"Direct WebEngine import leaked outside Chromium seam: {java_file.name}")
+            f"Direct WebEngine import leaked outside AiWebEngineHost: {java_file.name}")
+
+runtime_source = (java_root / "WebEngineSessionRuntime.java").read_text(encoding="utf-8")
+if "org.chromium.webengine" in runtime_source:
+    errors.append("WebEngineSessionRuntime must remain independent from Chromium Java API types")
+if "currentActiveTab" not in (java_root / "AiWebEngineHost.java").read_text(encoding="utf-8"):
+    errors.append("AiWebEngineHost must resolve Chromium's active tab at operation time")
 
 install_script = (ROOT / "scripts/install_aihub_local.sh").read_text(encoding="utf-8")
 if "AiHubShellActivity" in install_script:
