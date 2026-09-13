@@ -54,9 +54,5 @@
                 <action android:name="com.yagay.aihub.action.BIND" />
             </intent-filter>
         </service>
-
-        <meta-data
-            android:name="org.chromium.webengine.shell.BrowserProcessMode"
-            android:value="local" />
     </application>
 </manifest>

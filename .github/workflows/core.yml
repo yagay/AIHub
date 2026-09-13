@@ -16,5 +16,7 @@ jobs:
           java-version: '17'
       - name: Validate provider rules and architecture
         run: python3 scripts/validate_provider_rules.py
+      - name: Validate repository wiring
+        run: python3 scripts/validate_repo.py
       - name: Run core smoke test
         run: bash scripts/run_core_smoke_test.sh

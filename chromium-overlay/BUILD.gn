@@ -65,8 +65,8 @@ android_library("aihub_java") {
     "java/com/yagay/aihub/chromium/ProviderRuleLoader.java",
     "java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
   ]
+  srcjar_deps = [ ":aihub_aidl" ]
   deps = [
-    ":aihub_aidl",
     ":aihub_core_java",
     ":aihub_resources",
     "//third_party/android_deps:com_google_guava_listenablefuture_java",
@@ -85,6 +85,15 @@ android_apk("aihub_apk") {
   deps = [
     ":aihub_assets",
     ":aihub_java",
-    "//weblayer/shell/android:webengine_service_provider_resources",
+  ]
+}
+
+# Development convenience: build the WebEngine support provider together with AIHub.
+# WebEngine's client API is loaded from the WebView/WebEngine implementation; a local Chromium
+# checkout normally uses the support APK while iterating on a Chromium revision.
+group("aihub_local") {
+  deps = [
+    ":aihub_apk",
+    "//weblayer/shell/android:weblayer_support_apk",
   ]
 }
