@@ -27,6 +27,8 @@ import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.CommandResult;
 
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +38,7 @@ import java.util.UUID;
 /** Unified AI shell: every provider/account/action shares one SessionManager/AiCommandBus path. */
 public final class AiHubShellActivity extends AppCompatActivity {
     private static final int REQUEST_ATTACHMENTS = 4107;
+    private static final int REQUEST_EXPORT_DIAGNOSTICS = 4108;
 
     private AiHubStateStore stateStore;
     private AiHubBootstrap.Graph graph;
@@ -44,6 +47,7 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private Button accountButton;
     private Button workspaceButton;
     private EditText composer;
+    private String pendingDiagnosticsExport;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -68,9 +72,16 @@ public final class AiHubShellActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_ATTACHMENTS || resultCode != RESULT_OK || data == null) return;
-        List<String> uris = collectSelectedUris(data);
-        if (!uris.isEmpty()) graph.sessions.attach(uris);
+        if (requestCode == REQUEST_ATTACHMENTS) {
+            if (resultCode != RESULT_OK || data == null) return;
+            List<String> uris = collectSelectedUris(data);
+            if (!uris.isEmpty()) graph.sessions.attach(uris);
+            return;
+        }
+        if (requestCode == REQUEST_EXPORT_DIAGNOSTICS) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+            writeDiagnostics(data.getData());
+        }
     }
 
     private void bindViews() {
@@ -294,25 +305,31 @@ public final class AiHubShellActivity extends AppCompatActivity {
     }
 
     private void showToolsMenu() {
-        String[] items = { getString(R.string.provider_diagnostics), getString(R.string.integration_token),
-                getString(R.string.rotate_token), getString(R.string.rule_warnings), getString(R.string.current_url) };
+        String[] items = {
+                getString(R.string.provider_diagnostics),
+                getString(R.string.export_diagnostics),
+                getString(R.string.integration_token),
+                getString(R.string.rotate_token),
+                getString(R.string.rule_warnings),
+                getString(R.string.current_url)
+        };
         new AlertDialog.Builder(this).setTitle(R.string.tools).setItems(items, (dialog, which) -> {
             switch (which) {
                 case 0 -> showProviderDiagnostics();
-                case 1 -> showIntegrationToken(false);
-                case 2 -> confirmRotateToken();
-                case 3 -> showRuleWarnings();
-                case 4 -> showCurrentUrl();
+                case 1 -> exportDiagnostics();
+                case 2 -> showIntegrationToken(false);
+                case 3 -> confirmRotateToken();
+                case 4 -> showRuleWarnings();
+                case 5 -> showCurrentUrl();
                 default -> { }
             }
         }).show();
     }
 
     private void showProviderDiagnostics() {
-        Futures.addCallback(runtime.probe(graph.sessions.currentKey()), new FutureCallback<>() {
+        Futures.addCallback(AiHubDiagnostics.snapshot(graph, runtime), new FutureCallback<>() {
             @Override public void onSuccess(String result) {
-                new AlertDialog.Builder(AiHubShellActivity.this).setTitle(R.string.provider_diagnostics)
-                        .setMessage(result == null ? "{}" : result).setPositiveButton(android.R.string.ok, null).show();
+                showCopyDialog(getString(R.string.provider_diagnostics), result == null ? "{}" : result);
             }
             @Override public void onFailure(Throwable error) {
                 Toast.makeText(AiHubShellActivity.this,
@@ -320,6 +337,36 @@ public final class AiHubShellActivity extends AppCompatActivity {
                         Toast.LENGTH_LONG).show();
             }
         }, getMainExecutor());
+    }
+
+    private void exportDiagnostics() {
+        Futures.addCallback(AiHubDiagnostics.snapshot(graph, runtime), new FutureCallback<>() {
+            @Override public void onSuccess(String result) {
+                pendingDiagnosticsExport = result == null ? "{}" : result;
+                Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("application/json")
+                        .putExtra(Intent.EXTRA_TITLE, "aihub-diagnostics.json");
+                startActivityForResult(create, REQUEST_EXPORT_DIAGNOSTICS);
+            }
+            @Override public void onFailure(Throwable error) {
+                Toast.makeText(AiHubShellActivity.this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
+            }
+        }, getMainExecutor());
+    }
+
+    private void writeDiagnostics(Uri uri) {
+        String text = pendingDiagnosticsExport;
+        pendingDiagnosticsExport = null;
+        if (text == null) return;
+        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+            if (output == null) throw new IllegalStateException("No output stream");
+            output.write(text.getBytes(StandardCharsets.UTF_8));
+            output.flush();
+            Toast.makeText(this, R.string.diagnostics_saved, Toast.LENGTH_SHORT).show();
+        } catch (Exception error) {
+            Toast.makeText(this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showCurrentUrl() {
