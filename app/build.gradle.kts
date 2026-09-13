@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
 }
 
+val aihubAbi = providers.gradleProperty("aihubAbi").orNull
+
 android {
     namespace = "com.yagay.aihub"
     compileSdk {
@@ -16,6 +18,12 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.3.0"
+
+        aihubAbi?.takeIf { it.isNotBlank() }?.let { abi ->
+            ndk {
+                abiFilters += abi
+            }
+        }
     }
 
     buildTypes {
