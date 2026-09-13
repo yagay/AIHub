@@ -13,6 +13,7 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.yagay.aihub.model.ProviderAction;
 import com.yagay.aihub.model.ProviderSpec;
 
 import java.util.LinkedHashMap;
@@ -25,6 +26,7 @@ public final class MainScreen {
         void onProviderSelected(String providerId);
         void onAccountRequested();
         void onAppModeToggled();
+        void onProviderAction(String actionId);
         void onNewChat();
         void onReload();
         void onStop();
@@ -37,12 +39,15 @@ public final class MainScreen {
     private final LinearLayout root;
     private final FrameLayout webContainer;
     private final LinearLayout providerRail;
+    private final HorizontalScrollView actionScroll;
+    private final LinearLayout actionRail;
     private final TextView providerTitle;
     private final Button accountButton;
     private final Button modeButton;
     private final EditText composer;
     private final LinearLayout composerBar;
     private final Map<String, Button> providerButtons = new LinkedHashMap<>();
+    private boolean appMode;
 
     public MainScreen(Activity activity, Callback callback) {
         this.activity = activity;
@@ -86,8 +91,16 @@ public final class MainScreen {
         root.addView(providerScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
 
-        // There is deliberately only one conversation surface. APP mode never renders a second
-        // native copy of the conversation; it keeps this exact live GeckoView visible.
+        actionScroll = new HorizontalScrollView(activity);
+        actionScroll.setHorizontalScrollBarEnabled(false);
+        actionRail = new LinearLayout(activity);
+        actionRail.setGravity(Gravity.CENTER_VERTICAL);
+        actionRail.setPadding(dp(4), 0, dp(4), 0);
+        actionScroll.addView(actionRail, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(actionScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+
         webContainer = new FrameLayout(activity);
         root.addView(webContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -147,6 +160,18 @@ public final class MainScreen {
             entry.getValue().setSelected(selected);
             entry.getValue().setTypeface(Typeface.DEFAULT, selected ? Typeface.BOLD : Typeface.NORMAL);
         }
+        setProviderActions(provider.appActions());
+    }
+
+    private void setProviderActions(List<ProviderAction> actions) {
+        actionRail.removeAllViews();
+        for (ProviderAction action : actions) {
+            Button button = button(action.label(), ignored -> callback.onProviderAction(action.id()));
+            button.setAllCaps(false);
+            actionRail.addView(button, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
+        }
+        updateAppChromeVisibility();
     }
 
     public void showAccount(String name) {
@@ -155,10 +180,15 @@ public final class MainScreen {
     }
 
     public void showAppMode(boolean enabled) {
+        appMode = enabled;
         modeButton.setText(enabled ? "APP" : "WEB");
         modeButton.setTypeface(Typeface.DEFAULT, enabled ? Typeface.BOLD : Typeface.NORMAL);
-        // WEB = official site only. APP = the exact same site/session plus native controls.
-        composerBar.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        updateAppChromeVisibility();
+    }
+
+    private void updateAppChromeVisibility() {
+        composerBar.setVisibility(appMode ? View.VISIBLE : View.GONE);
+        actionScroll.setVisibility(appMode && actionRail.getChildCount() > 0 ? View.VISIBLE : View.GONE);
     }
 
     public void setComposerText(String text) {
