@@ -91,7 +91,7 @@ public final class WebSessionManager {
             session.geckoSession.loadUri(adapter.spec().homeUrl());
         }
         currentKey = key;
-        geckoView.setSession(session.geckoSession);
+        attachToView(session.geckoSession);
         events.onConversationChanged(session.lastMessages);
         if (session.bridgePort != null && isTrusted(session)) requestProbe(session);
     }
@@ -164,10 +164,10 @@ public final class WebSessionManager {
 
     public void destroy() {
         filePicker.destroy();
+        if (geckoView.getSession() != null) geckoView.releaseSession();
         for (Session session : sessions.values()) destroySession(session);
         sessions.clear();
         currentKey = null;
-        geckoView.releaseSession();
     }
 
     private void createSession(Session holder) {
@@ -184,10 +184,11 @@ public final class WebSessionManager {
                 if (crashed != holder.geckoSession) return;
                 boolean selected = holder.key.equals(currentKey);
                 String target = holder.lastUrl == null ? holder.adapter.spec().homeUrl() : holder.lastUrl;
+                if (geckoView.getSession() == crashed) geckoView.releaseSession();
                 destroySession(holder);
                 createSession(holder);
                 holder.geckoSession.loadUri(target);
-                if (selected) geckoView.setSession(holder.geckoSession);
+                if (selected) attachToView(holder.geckoSession);
                 events.onMessage("Browser process restarted");
             }
         });
@@ -288,9 +289,12 @@ public final class WebSessionManager {
                 new WebExtension.MessageDelegate() {
                     @Override
                     public void onConnect(WebExtension.Port port) {
-                        if (port.sender.session != holder.geckoSession) {
+                        if (port.sender.session != holder.geckoSession || !port.sender.isTopLevel()) {
                             port.disconnect();
                             return;
+                        }
+                        if (port.sender.url != null && !port.sender.url.isBlank()) {
+                            holder.lastUrl = port.sender.url;
                         }
                         holder.bridgePort = port;
                         port.setDelegate(new WebExtension.PortDelegate() {
@@ -397,6 +401,13 @@ public final class WebSessionManager {
             Session session = current();
             if (session != null) events.onConversationChanged(session.lastMessages);
         }
+    }
+
+    private void attachToView(GeckoSession session) {
+        GeckoSession attached = geckoView.getSession();
+        if (attached == session) return;
+        if (attached != null) geckoView.releaseSession();
+        geckoView.setSession(session);
     }
 
     private Session current() {
