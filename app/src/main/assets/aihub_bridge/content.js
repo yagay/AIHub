@@ -31,16 +31,6 @@
   const visible = element => !!element && !element.disabled &&
       !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
 
-  const first = list => {
-    for (const selector of list) {
-      try {
-        const element = document.querySelector(selector);
-        if (element) return element;
-      } catch (_) {}
-    }
-    return null;
-  };
-
   const firstVisible = list => {
     for (const selector of list) {
       try {
@@ -62,6 +52,20 @@
     return null;
   };
 
+  const dispatchInput = (input, value) => {
+    try {
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        composed: true,
+        inputType: 'insertText',
+        data: value
+      }));
+    } catch (_) {
+      input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    }
+    input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  };
+
   const setComposerText = (input, value) => {
     input.focus();
     if ('value' in input) {
@@ -74,19 +78,23 @@
       }
       if (setter) setter.call(input, value);
       else input.value = value;
-    } else {
-      input.textContent = value;
+      dispatchInput(input, value);
+      return;
     }
+
+    // ProseMirror and other contenteditable editors usually need an editing operation rather than
+    // a raw textContent assignment so their framework state observes the change.
+    let inserted = false;
     try {
-      input.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        inputType: 'insertText',
-        data: value
-      }));
-    } catch (_) {
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+      const selection = getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      inserted = document.execCommand('insertText', false, value);
+    } catch (_) {}
+    if (!inserted) input.textContent = value;
+    dispatchInput(input, value);
   };
 
   const clickAction = (configured, words) => {
@@ -110,15 +118,29 @@
     add(selectors(command, 'userMessage'), 'user');
     add(selectors(command, 'assistantMessage'), 'assistant');
 
-    return [...roles.entries()]
+    const ordered = [...roles.entries()]
       .sort((a, b) => {
         if (a[0] === b[0]) return 0;
         const position = a[0].compareDocumentPosition(b[0]);
         return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
       })
-      .map(([node, role]) => ({ role, text: (node.innerText || node.textContent || '').trim() }))
+      .map(([node, role]) => ({
+        role,
+        text: (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim()
+      }))
       .filter(item => item.text.length > 0);
+
+    const deduped = [];
+    for (const item of ordered) {
+      const previous = deduped[deduped.length - 1];
+      if (previous && previous.role === item.role && previous.text === item.text) continue;
+      deduped.push(item);
+    }
+    return deduped.slice(-100);
   };
+
+  const findComposer = command => firstVisible(selectors(command, 'input')) ||
+    [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].find(visible) || null;
 
   const handleCommand = command => {
     if (!command || typeof command !== 'object') return;
@@ -127,8 +149,7 @@
     const respond = payload => post(Object.assign({ type: 'response', action, requestId }, payload));
 
     if (action === 'probe') {
-      const input = firstVisible(selectors(command, 'input')) ||
-        [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].find(visible) || null;
+      const input = findComposer(command);
       respond({
         ok: !!input,
         composer: !!input,
@@ -139,8 +160,7 @@
     }
 
     if (action === 'send') {
-      const input = firstVisible(selectors(command, 'input')) ||
-        [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].find(visible) || null;
+      const input = findComposer(command);
       if (!input) {
         respond({ ok: false, stage: 'input' });
         return;
