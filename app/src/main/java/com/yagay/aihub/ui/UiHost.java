@@ -32,11 +32,14 @@ public final class UiHost {
     private final FrameLayout root;
     private final WebView webView;
     private final TextView status;
+    private final TextView diagnostics;
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    private boolean pageReady;
-    private boolean stickyStatus;
-    private String lastConsoleError = "";
+    private volatile boolean pageReady;
+    private volatile boolean stickyStatus;
+    private volatile String lastConsoleError = "";
+    private volatile String lastLoadedUrl = "";
+    private volatile Runnable diagnosticAction;
 
     public UiHost(ComponentActivity activity) {
         this.activity = activity;
@@ -74,6 +77,7 @@ public final class UiHost {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                lastLoadedUrl = url == null ? "" : url;
                 if (url != null && url.startsWith("https://appassets.androidplatform.net/")) {
                     pageReady = true;
                     main.postDelayed(() -> {
@@ -124,10 +128,45 @@ public final class UiHost {
         status.setBackgroundColor(Color.rgb(21, 21, 21));
         root.addView(status, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // Always stays above the WebView/status layer so diagnostics are reachable even on a blank UI.
+        diagnostics = new TextView(activity);
+        diagnostics.setText("诊断");
+        diagnostics.setTextColor(Color.WHITE);
+        diagnostics.setTextSize(12f);
+        diagnostics.setGravity(Gravity.CENTER);
+        diagnostics.setPadding(dp(12), dp(7), dp(12), dp(7));
+        diagnostics.setBackgroundColor(Color.argb(210, 45, 45, 45));
+        diagnostics.setOnClickListener(v -> {
+            Runnable action = diagnosticAction;
+            if (action != null) action.run();
+        });
+        FrameLayout.LayoutParams diagnosticParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        diagnosticParams.gravity = Gravity.TOP | Gravity.END;
+        diagnosticParams.topMargin = dp(18);
+        diagnosticParams.rightMargin = dp(14);
+        root.addView(diagnostics, diagnosticParams);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * activity.getResources().getDisplayMetrics().density);
     }
 
     public View view() {
         return root;
+    }
+
+    public void setDiagnosticAction(Runnable action) {
+        diagnosticAction = action;
+    }
+
+    /** Safe state snapshot; contains no chat contents or browser credentials. */
+    public String diagnosticSnapshot() {
+        return "pageReady=" + pageReady + "\n"
+                + "stickyStatus=" + stickyStatus + "\n"
+                + "lastLoadedUrl=" + lastLoadedUrl + "\n"
+                + "lastConsoleError=" + lastConsoleError + "\n";
     }
 
     public void start() {
