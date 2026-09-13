@@ -4,7 +4,11 @@ plugins {
 
 android {
     namespace = "com.yagay.aihub"
-    compileSdk = 36
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         applicationId = "com.yagay.aihub"
