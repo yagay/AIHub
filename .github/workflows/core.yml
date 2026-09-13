@@ -17,6 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate provider configuration
+        run: python3 tools/validate_providers.py
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
