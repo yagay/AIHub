@@ -46,14 +46,15 @@
 
 ## Phase 4 — external integrations ✅ base API complete
 
-- [x] token-gated custom Android Intents
-- [x] token-gated deep links
+- [x] token-gated unattended Android Intents
+- [x] tokenless deep links with explicit user confirmation
 - [x] AIDL/Binder service
 - [x] provider/account/session query APIs
 - [x] Android share-sheet entry
 - [x] explicit confirmation for ordinary shares
 - [x] exported guarded EntryActivity + unexported ShellActivity
 - [x] one-shot internal command dispatch to prevent replay after Activity recreation
+- [x] repeated `singleTop` EntryActivity intents revalidated through `onNewIntent`
 - [ ] optional per-caller package/signature permission UI in addition to the client token
 - [ ] Android shortcuts/widgets
 - [ ] external event callbacks/subscriptions
@@ -63,6 +64,7 @@
 - [x] provider-rule validation
 - [x] architecture/wiring validation
 - [x] security invariants in repository validation
+- [x] shell/Python syntax validation
 - [x] core smoke tests
 - [x] GitHub Actions on pushes and pull requests
 - [x] Chromium WebEngine API compatibility checker
