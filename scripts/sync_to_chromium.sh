@@ -10,11 +10,7 @@ CHROMIUM_SRC="$(cd "$1" && pwd)"
 AIHUB_SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$CHROMIUM_SRC/aihub"
 
-if [[ ! -f "$CHROMIUM_SRC/weblayer/public/java/BUILD.gn" ]]; then
-  echo "This Chromium checkout does not expose //weblayer/public/java." >&2
-  echo "Use a compatible Chromium revision or adapt chromium-overlay first." >&2
-  exit 3
-fi
+python3 "$AIHUB_SRC/scripts/check_chromium_checkout.py" "$CHROMIUM_SRC"
 
 if [[ "$AIHUB_SRC" == "$DEST" ]]; then
   echo "AIHub is already located at $DEST; no copy is needed."
@@ -26,5 +22,4 @@ else
   echo "AIHub synced to: $DEST"
 fi
 
-python3 "$DEST/scripts/check_chromium_compat.py" "$CHROMIUM_SRC"
 echo "Build target: autoninja -C out/Default //aihub/chromium-overlay:aihub_local"
