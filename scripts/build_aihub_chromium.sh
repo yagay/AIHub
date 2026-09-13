@@ -51,4 +51,4 @@ if [[ ! -f "$CHROME_APK" ]]; then
 fi
 
 echo "Build complete: $CHROMIUM_SRC/$CHROME_APK"
-echo "AIHub is embedded in the normal Chromium browser; no WebEngine/support APK is used."
+echo "AIHub is embedded directly in the normal Chromium browser."
