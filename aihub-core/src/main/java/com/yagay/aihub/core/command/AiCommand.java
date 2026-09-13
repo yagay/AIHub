@@ -35,4 +35,8 @@ public record AiCommand(
     public static AiCommand attach(List<String> uris) {
         return new AiCommand(AiCommandType.ATTACH, null, null, null, null, uris);
     }
+
+    public static AiCommand attachAndSend(List<String> uris, String text) {
+        return new AiCommand(AiCommandType.ATTACH_AND_SEND, null, null, null, text, uris);
+    }
 }
