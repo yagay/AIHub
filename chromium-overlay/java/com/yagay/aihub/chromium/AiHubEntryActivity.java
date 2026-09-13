@@ -19,12 +19,27 @@ public final class AiHubEntryActivity extends AppCompatActivity {
     public static final String EXTRA_INTERNAL_DISPATCH = "com.yagay.aihub.internal.DISPATCH";
 
     private AiHubStateStore stateStore;
+    private AlertDialog confirmationDialog;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         stateStore = new AiHubStateStore(this);
         route(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        dismissConfirmation();
+        route(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        dismissConfirmation();
+        super.onDestroy();
     }
 
     private void route(Intent source) {
@@ -40,13 +55,14 @@ public final class AiHubEntryActivity extends AppCompatActivity {
                 deny();
                 return;
             }
-            new AlertDialog.Builder(this)
+            confirmationDialog = new AlertDialog.Builder(this)
                     .setTitle(R.string.share_confirm_title)
                     .setMessage(R.string.share_confirm_message)
                     .setNegativeButton(android.R.string.cancel, (dialog, which) -> finish())
                     .setOnCancelListener(dialog -> finish())
                     .setPositiveButton(android.R.string.ok, (dialog, which) -> forwardToShell(source))
-                    .show();
+                    .create();
+            confirmationDialog.show();
             return;
         }
 
@@ -60,6 +76,7 @@ public final class AiHubEntryActivity extends AppCompatActivity {
     }
 
     private void forwardToShell(@Nullable Intent source) {
+        dismissConfirmation();
         Intent target = source == null ? new Intent() : new Intent(source);
         target.setClass(this, AiHubShellActivity.class);
         target.putExtra(EXTRA_INTERNAL_DISPATCH, source != null);
@@ -69,7 +86,15 @@ public final class AiHubEntryActivity extends AppCompatActivity {
     }
 
     private void deny() {
+        dismissConfirmation();
         Toast.makeText(this, R.string.external_request_denied, Toast.LENGTH_LONG).show();
         finish();
+    }
+
+    private void dismissConfirmation() {
+        if (confirmationDialog != null) {
+            confirmationDialog.dismiss();
+            confirmationDialog = null;
+        }
     }
 }
