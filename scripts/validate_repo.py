@@ -30,6 +30,8 @@ layout = (ROOT / "chromium-overlay/res/layout/aihub_activity_main.xml").read_tex
 strings_xml = ET.parse(ROOT / "chromium-overlay/res/values/strings.xml")
 strings = {node.attrib["name"] for node in strings_xml.getroot().findall("string")}
 java_root = ROOT / "chromium-overlay/java/com/yagay/aihub/chromium"
+core_root = ROOT / "aihub-core/src/main/java"
+api_root = ROOT / "android-api/src/main"
 
 for java_file in java_root.glob("*.java"):
     text = java_file.read_text(encoding="utf-8")
@@ -82,14 +84,33 @@ for action in re.findall(r'public static final String (ACTION_[A-Z_]+) =', contr
     if action not in parser:
         errors.append(f"External command parser does not handle {action}")
 
-# Reusable automation credentials must never be placed in a deep-link URL. Deep links are
-# tokenless and user-confirmed; unattended automation uses Intent extras or Binder.
 if re.search(r'getQueryParameter\s*\(\s*"token"\s*\)', parser):
     errors.append("Deep links must not read the client token from URL query parameters")
-if "Intent.ACTION_VIEW" not in entry_source or "link_confirm_message" not in entry_source:
+if "Intent.ACTION_VIEW" not in entry_source or "confirmAndForward" not in entry_source:
     errors.append("AiHubEntryActivity must explicitly confirm deep-link ACTION_VIEW requests")
 if "onNewIntent" not in entry_source:
     errors.append("AiHubEntryActivity must revalidate singleTop requests in onNewIntent")
+
+# Product simplification invariant: no account/workspace abstraction in active source code.
+for root in (core_root, java_root, api_root):
+    for path in root.rglob("*"):
+        if path.suffix not in {".java", ".aidl"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for forbidden in (
+            "AiAccount", "AccountRegistry", "AiWorkspace", "WorkspaceRegistry",
+            "accountId", "workspaceId", "EXTRA_ACCOUNT_ID", "EXTRA_WORKSPACE_ID",
+        ):
+            if forbidden in text:
+                errors.append(f"Provider-only source still contains {forbidden}: {path.relative_to(ROOT)}")
+
+# Chromium API churn must remain behind exactly two adapter files.
+allowed_chromium_importers = {"AiWebEngineHost.java", "WebEngineSessionRuntime.java"}
+for java_file in java_root.glob("*.java"):
+    text = java_file.read_text(encoding="utf-8")
+    if "org.chromium.webengine" in text and java_file.name not in allowed_chromium_importers:
+        errors.append(
+            f"Direct WebEngine import leaked outside Chromium seam: {java_file.name}")
 
 install_script = (ROOT / "scripts/install_aihub_local.sh").read_text(encoding="utf-8")
 if "AiHubShellActivity" in install_script:
