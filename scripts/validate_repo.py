@@ -130,14 +130,16 @@ for root in (core_root, java_root, api_root):
             if forbidden in text:
                 errors.append(f"Provider-only source still contains {forbidden}: {path.relative_to(ROOT)}")
 
-# Direct Chromium/WebEngine Java API usage is allowed in exactly one file.
+# Direct Chromium/WebEngine Java API imports are allowed in exactly one file. Comments and docs may
+# mention the package name, so match Java import statements rather than raw text.
+webengine_import = re.compile(r'^\s*import\s+org\.chromium\.webengine(?:\.|\.)', re.MULTILINE)
 for java_file in java_root.glob("*.java"):
     text = java_file.read_text(encoding="utf-8")
-    if "org.chromium.webengine" in text and java_file.name != "AiWebEngineHost.java":
+    if webengine_import.search(text) and java_file.name != "AiWebEngineHost.java":
         errors.append(f"Direct WebEngine import leaked outside AiWebEngineHost: {java_file.name}")
 
 runtime_source = (java_root / "WebEngineSessionRuntime.java").read_text(encoding="utf-8")
-if "org.chromium.webengine" in runtime_source:
+if webengine_import.search(runtime_source):
     errors.append("WebEngineSessionRuntime must remain independent from Chromium Java API types")
 
 host_source = (java_root / "AiWebEngineHost.java").read_text(encoding="utf-8")
