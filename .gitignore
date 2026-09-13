@@ -6,3 +6,6 @@ local.properties
 .build/
 app/src/main/assets/ui/
 app/src/main/assets/native/
+app/src/main/assets/nodejs-project/
+app/src/main/jniLibs/
+app/node-runtime/
