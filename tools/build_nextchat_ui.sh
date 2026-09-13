@@ -12,6 +12,7 @@ mkdir -p "$(dirname "$WORK")" "$OUT"
 git clone --filter=blob:none --no-checkout https://github.com/ChatGPTNextWeb/NextChat.git "$WORK"
 git -C "$WORK" checkout --detach "$NEXTCHAT_COMMIT"
 
+cp "$ROOT/ui/nextchat/aihub-gateway-settings.tsx" "$WORK/app/components/aihub-gateway-settings.tsx"
 python3 "$ROOT/ui/nextchat/patch_nextchat.py" "$WORK"
 
 cd "$WORK"
