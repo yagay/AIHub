@@ -29,6 +29,9 @@ public final class CoreSmokeTest {
         workspaces.register(new AiWorkspace("work", "Work", Map.of(
                 "chatgpt", "gpt_work",
                 "claude", "claude_work")));
+        workspaces.register(new AiWorkspace("stale", "Stale", Map.of(
+                "chatgpt", "missing_account",
+                "claude", "gpt_personal")));
 
         RecordingSessionRuntime runtime = new RecordingSessionRuntime();
         SessionManager sessions = new SessionManager(providers, accounts, workspaces, runtime);
@@ -47,16 +50,21 @@ public final class CoreSmokeTest {
         sessions.previousProvider();
         check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "previous provider keeps workspace");
 
+        sessions.switchWorkspace("stale");
+        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "stale workspace account falls back safely");
+        sessions.switchProvider("claude");
+        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_work")), "wrong-provider workspace account falls back safely");
+
         check(bus.execute(AiCommand.simple(AiCommandType.BACK)).success(), "back");
         check(bus.execute(AiCommand.simple(AiCommandType.FORWARD)).success(), "forward");
         check(bus.execute(AiCommand.simple(AiCommandType.RELOAD)).success(), "reload");
         check(bus.execute(AiCommand.attach(List.of("content://example/a.pdf"))).success(), "attach");
 
         check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_personal:hello")), "send event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("back:chatgpt:gpt_work")), "back event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:chatgpt:gpt_work")), "forward event");
-        check(runtime.events().stream().anyMatch(e -> e.startsWith("reload:chatgpt:gpt_work")), "reload event");
-        check(runtime.events().stream().anyMatch(e -> e.equals("attach:chatgpt:gpt_work:1")), "attach event");
+        check(runtime.events().stream().anyMatch(e -> e.startsWith("back:claude:claude_work")), "back event");
+        check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:claude:claude_work")), "forward event");
+        check(runtime.events().stream().anyMatch(e -> e.startsWith("reload:claude:claude_work")), "reload event");
+        check(runtime.events().stream().anyMatch(e -> e.equals("attach:claude:claude_work:1")), "attach event");
 
         System.out.println("AIHub core smoke test passed");
         runtime.events().forEach(System.out::println);
