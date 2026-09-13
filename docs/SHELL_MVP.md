@@ -71,7 +71,7 @@ target_os = "android"
 Then run:
 
 ```bash
-./scripts/build_install_aihub.sh /path/to/chromium/src out/Default
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
 For multiple connected devices, pass the serial as the third argument or set `ANDROID_SERIAL`.
