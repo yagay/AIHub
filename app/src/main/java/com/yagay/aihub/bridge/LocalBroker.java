@@ -137,9 +137,14 @@ public final class LocalBroker implements Closeable {
         if ("GET".equals(request.method) && "/v1/models".equals(request.path)) {
             JSONArray data = new JSONArray();
             for (String model : MODEL_TO_PROVIDER.keySet()) {
-                data.put(new JSONObject().put("id", model).put("object", "model").put("root", model));
+                data.put(new JSONObject()
+                        .put("id", model)
+                        .put("object", "model")
+                        .put("root", model));
             }
-            writeJson(out, 200, new JSONObject().put("object", "list").put("data", data), request.origin);
+            writeJson(out, 200,
+                    new JSONObject().put("object", "list").put("data", data),
+                    request.origin);
             return;
         }
 
@@ -152,7 +157,9 @@ public final class LocalBroker implements Closeable {
     }
 
     private int connectedClientCount() {
-        synchronized (lock) { return clients.size(); }
+        synchronized (lock) {
+            return clients.size();
+        }
     }
 
     private static boolean isUiOriginAllowed(String origin) {
@@ -163,14 +170,18 @@ public final class LocalBroker implements Closeable {
         String model = body.optString("model", "chatgpt-web");
         String provider = MODEL_TO_PROVIDER.get(model);
         if (provider == null) {
-            writeJson(out, 400, new JSONObject().put("error",
-                    new JSONObject().put("message", "Unsupported web model: " + model)), origin);
+            writeJson(out, 400,
+                    new JSONObject().put("error",
+                            new JSONObject().put("message", "Unsupported web model: " + model)),
+                    origin);
             return;
         }
 
         String id = UUID.randomUUID().toString();
         CompletableFuture<Result> future = new CompletableFuture<>();
-        Command command = new Command(id, provider, flattenMessages(body.optJSONArray("messages")));
+        Command command = new Command(id, provider,
+                flattenMessages(body.optJSONArray("messages")));
+
         synchronized (lock) {
             pending.put(id, future);
             commands.put(id, command);
@@ -184,20 +195,25 @@ public final class LocalBroker implements Closeable {
         try {
             result = future.get(210, TimeUnit.SECONDS);
         } catch (Exception timeout) {
-            result = new Result("", "Titanium extension timed out. Open Titanium, confirm the AIHub extension is enabled, and make sure the provider is logged in.");
+            result = new Result("",
+                    "Titanium extension timed out. Open Titanium, confirm the AIHub extension is enabled, and make sure the provider is logged in.");
         } finally {
             synchronized (lock) {
                 pending.remove(id);
                 commands.remove(id);
                 queuedIds.remove(id);
                 queue.removeIf(c -> id.equals(c.id));
-                for (WsClient client : clients) client.assigned.remove(id);
+                for (WsClient client : clients) {
+                    client.assigned.remove(id);
+                }
             }
         }
 
         if (!result.error.isEmpty()) {
-            writeJson(out, 502, new JSONObject().put("error",
-                    new JSONObject().put("message", result.error)), origin);
+            writeJson(out, 502,
+                    new JSONObject().put("error",
+                            new JSONObject().put("message", result.error)),
+                    origin);
             return;
         }
 
@@ -219,20 +235,25 @@ public final class LocalBroker implements Closeable {
                             .put("finish_reason", "stop")))
                     .toString();
             write(out, 200, "text/event-stream",
-                    "data: " + chunk + "\n\ndata: " + done + "\n\ndata: [DONE]\n\n", origin);
+                    "data: " + chunk + "\n\ndata: " + done + "\n\ndata: [DONE]\n\n",
+                    origin);
         } else {
             JSONObject response = new JSONObject()
                     .put("id", "chatcmpl-" + id)
                     .put("object", "chat.completion")
                     .put("choices", new JSONArray().put(new JSONObject()
                             .put("index", 0)
-                            .put("message", new JSONObject().put("role", "assistant").put("content", result.response))
+                            .put("message", new JSONObject()
+                                    .put("role", "assistant")
+                                    .put("content", result.response))
                             .put("finish_reason", "stop")));
             writeJson(out, 200, response, origin);
         }
     }
 
-    private void handleWebSocket(Socket socket, BufferedInputStream in, BufferedOutputStream out,
+    private void handleWebSocket(Socket socket,
+                                 BufferedInputStream in,
+                                 BufferedOutputStream out,
                                  Request request) throws Exception {
         String origin = request.headers.get("origin");
         if (origin == null || !origin.startsWith("chrome-extension://")) {
@@ -248,16 +269,17 @@ public final class LocalBroker implements Closeable {
             return;
         }
 
-        String accept = websocketAccept(key);
         String response = "HTTP/1.1 101 Switching Protocols\r\n"
                 + "Upgrade: websocket\r\n"
                 + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
+                + "Sec-WebSocket-Accept: " + websocketAccept(key) + "\r\n\r\n";
         out.write(response.getBytes(StandardCharsets.US_ASCII));
         out.flush();
 
         WsClient client = new WsClient(socket, in, out);
-        synchronized (lock) { clients.add(client); }
+        synchronized (lock) {
+            clients.add(client);
+        }
         client.sendJson(new JSONObject().put("type", "ready").put("protocol", 1));
 
         ByteArrayOutputStream fragmented = null;
@@ -265,12 +287,16 @@ public final class LocalBroker implements Closeable {
         try {
             while (running && !socket.isClosed()) {
                 WsFrame frame = readFrame(in);
-                if (frame == null || frame.opcode == 0x8) break;
+                if (frame == null || frame.opcode == 0x8) {
+                    break;
+                }
                 if (frame.opcode == 0x9) {
                     client.sendFrame(0xA, frame.payload);
                     continue;
                 }
-                if (frame.opcode == 0xA) continue;
+                if (frame.opcode == 0xA) {
+                    continue;
+                }
 
                 if (frame.opcode == 0x1 || frame.opcode == 0x2) {
                     if (frame.fin) {
@@ -279,6 +305,9 @@ public final class LocalBroker implements Closeable {
                                     new String(frame.payload, StandardCharsets.UTF_8));
                         }
                     } else {
+                        if (frame.payload.length > MAX_WS_MESSAGE) {
+                            throw new IllegalArgumentException("WebSocket message too large");
+                        }
                         fragmented = new ByteArrayOutputStream();
                         fragmented.write(frame.payload);
                         fragmentedOpcode = frame.opcode;
@@ -310,13 +339,16 @@ public final class LocalBroker implements Closeable {
         try {
             JSONObject message = new JSONObject(text);
             String type = message.optString("type", "");
+
             if ("hello".equals(type) || "providers".equals(type)) {
                 Set<String> providers = new HashSet<>();
                 JSONArray array = message.optJSONArray("providers");
                 if (array != null) {
                     for (int i = 0; i < array.length(); i++) {
                         String provider = array.optString(i, "");
-                        if (MODEL_TO_PROVIDER.containsValue(provider)) providers.add(provider);
+                        if (MODEL_TO_PROVIDER.containsValue(provider)) {
+                            providers.add(provider);
+                        }
                     }
                 }
                 synchronized (lock) {
@@ -335,7 +367,8 @@ public final class LocalBroker implements Closeable {
                     future = pending.get(id);
                 }
                 if (future != null) {
-                    future.complete(new Result(message.optString("response", ""),
+                    future.complete(new Result(
+                            message.optString("response", ""),
                             message.optString("error", "")));
                 }
                 return;
@@ -344,7 +377,8 @@ public final class LocalBroker implements Closeable {
             if ("ping".equals(type)) {
                 client.sendJson(new JSONObject().put("type", "pong"));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     private void dispatchQueued() {
@@ -352,30 +386,37 @@ public final class LocalBroker implements Closeable {
             while (running) {
                 Command command = null;
                 WsClient client = null;
+
                 synchronized (lock) {
                     Iterator<Command> iterator = queue.iterator();
                     while (iterator.hasNext() && command == null) {
                         Command candidate = iterator.next();
-                        for (WsClient c : clients) {
-                            if (c.open && c.providers.contains(candidate.provider)) {
+                        for (WsClient candidateClient : clients) {
+                            if (candidateClient.open
+                                    && candidateClient.providers.contains(candidate.provider)) {
                                 command = candidate;
-                                client = c;
+                                client = candidateClient;
                                 iterator.remove();
                                 queuedIds.remove(candidate.id);
-                                c.assigned.add(candidate.id);
+                                candidateClient.assigned.add(candidate.id);
                                 break;
                             }
                         }
                     }
                 }
-                if (command == null || client == null) return;
+
+                if (command == null || client == null) {
+                    return;
+                }
 
                 try {
                     client.sendJson(command.toJson());
                 } catch (Exception sendFailed) {
                     synchronized (lock) {
                         client.assigned.remove(command.id);
-                        if (pending.containsKey(command.id)) enqueueLocked(command);
+                        if (pending.containsKey(command.id)) {
+                            enqueueLocked(command);
+                        }
                     }
                     onClientClosed(client);
                 }
@@ -386,36 +427,54 @@ public final class LocalBroker implements Closeable {
     private void onClientClosed(WsClient client) {
         Set<String> retry = new HashSet<>();
         synchronized (lock) {
-            if (!clients.remove(client)) return;
+            if (!clients.remove(client)) {
+                return;
+            }
             client.open = false;
             retry.addAll(client.assigned);
             client.assigned.clear();
             for (String id : retry) {
                 Command command = commands.get(id);
-                if (command != null && pending.containsKey(id)) enqueueLocked(command);
+                if (command != null && pending.containsKey(id)) {
+                    enqueueLocked(command);
+                }
             }
         }
         client.closeQuietly();
-        if (!retry.isEmpty()) dispatchQueued();
+        if (!retry.isEmpty()) {
+            dispatchQueued();
+        }
     }
 
     private void enqueueLocked(Command command) {
-        if (queuedIds.add(command.id)) queue.addLast(command);
+        if (queuedIds.add(command.id)) {
+            queue.addLast(command);
+        }
     }
 
     private static String flattenMessages(JSONArray messages) {
-        if (messages == null || messages.length() == 0) return "";
+        if (messages == null || messages.length() == 0) {
+            return "";
+        }
+
         StringBuilder text = new StringBuilder();
         for (int i = 0; i < messages.length(); i++) {
             JSONObject message = messages.optJSONObject(i);
-            if (message == null) continue;
+            if (message == null) {
+                continue;
+            }
             String role = message.optString("role", "user");
             Object content = message.opt("content");
             String value = content instanceof String
                     ? (String) content
                     : String.valueOf(content == null ? "" : content);
-            if (value.trim().isEmpty()) continue;
-            text.append(role.toUpperCase(Locale.ROOT)).append(": ").append(value).append("\n\n");
+            if (value.trim().isEmpty()) {
+                continue;
+            }
+            text.append(role.toUpperCase(Locale.ROOT))
+                    .append(": ")
+                    .append(value)
+                    .append("\n\n");
         }
         text.append("Answer the latest USER message while respecting the conversation above.");
         return text.toString();
@@ -423,42 +482,62 @@ public final class LocalBroker implements Closeable {
 
     private static Request readRequest(InputStream in) throws Exception {
         String first = readLine(in);
-        if (first == null || first.trim().isEmpty()) return null;
+        if (first == null || first.trim().isEmpty()) {
+            return null;
+        }
+
         String[] parts = first.split(" ", 3);
-        if (parts.length < 2) return null;
+        if (parts.length < 2) {
+            return null;
+        }
 
         Map<String, String> headers = new HashMap<>();
         int length = 0;
         String line;
         while ((line = readLine(in)) != null && !line.isEmpty()) {
             int colon = line.indexOf(':');
-            if (colon <= 0) continue;
+            if (colon <= 0) {
+                continue;
+            }
             String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
             String value = line.substring(colon + 1).trim();
             headers.put(name, value);
-            if ("content-length".equals(name)) length = Integer.parseInt(value);
+            if ("content-length".equals(name)) {
+                length = Integer.parseInt(value);
+            }
         }
+
         if (length < 0 || length > MAX_HTTP_BODY) {
             throw new IllegalArgumentException("HTTP body too large");
         }
 
         byte[] body = readExact(in, length);
         URI uri = URI.create(parts[1]);
-        return new Request(parts[0], uri.getPath(), uri.getRawQuery(),
-                new String(body, StandardCharsets.UTF_8), headers, headers.get("origin"));
+        return new Request(
+                parts[0],
+                uri.getPath(),
+                new String(body, StandardCharsets.UTF_8),
+                headers,
+                headers.get("origin"));
     }
 
     private static String readLine(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         int b;
         while ((b = in.read()) >= 0) {
-            if (b == '\n') break;
-            if (b != '\r') out.write(b);
+            if (b == '\n') {
+                break;
+            }
+            if (b != '\r') {
+                out.write(b);
+            }
             if (out.size() > 16 * 1024) {
                 throw new IllegalArgumentException("HTTP header line too large");
             }
         }
-        if (b < 0 && out.size() == 0) return null;
+        if (b < 0 && out.size() == 0) {
+            return null;
+        }
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
@@ -467,7 +546,9 @@ public final class LocalBroker implements Closeable {
         int offset = 0;
         while (offset < length) {
             int count = in.read(data, offset, length - offset);
-            if (count < 0) throw new EOFException();
+            if (count < 0) {
+                throw new EOFException();
+            }
             offset += count;
         }
         return data;
@@ -482,12 +563,21 @@ public final class LocalBroker implements Closeable {
 
     private static WsFrame readFrame(InputStream in) throws Exception {
         int b0 = in.read();
-        if (b0 < 0) return null;
+        if (b0 < 0) {
+            return null;
+        }
         int b1 = in.read();
-        if (b1 < 0) throw new EOFException();
+        if (b1 < 0) {
+            throw new EOFException();
+        }
+
         boolean fin = (b0 & 0x80) != 0;
         int opcode = b0 & 0x0F;
         boolean masked = (b1 & 0x80) != 0;
+        if (!masked) {
+            throw new IllegalArgumentException("Client WebSocket frames must be masked");
+        }
+
         long length = b1 & 0x7F;
         if (length == 126) {
             byte[] ext = readExact(in, 2);
@@ -496,23 +586,30 @@ public final class LocalBroker implements Closeable {
             byte[] ext = readExact(in, 8);
             length = ByteBuffer.wrap(ext).getLong();
         }
+
         if (length < 0 || length > MAX_WS_MESSAGE) {
             throw new IllegalArgumentException("WebSocket frame too large");
         }
-        byte[] mask = masked ? readExact(in, 4) : null;
+
+        byte[] mask = readExact(in, 4);
         byte[] payload = readExact(in, (int) length);
-        if (mask != null) {
-            for (int i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
+        for (int i = 0; i < payload.length; i++) {
+            payload[i] ^= mask[i & 3];
         }
         return new WsFrame(fin, opcode, payload);
     }
 
-    private static void writeJson(OutputStream out, int status, JSONObject json,
+    private static void writeJson(OutputStream out,
+                                  int status,
+                                  JSONObject json,
                                   String origin) throws Exception {
         write(out, status, "application/json; charset=utf-8", json.toString(), origin);
     }
 
-    private static void write(OutputStream out, int status, String type, String body,
+    private static void write(OutputStream out,
+                              int status,
+                              String type,
+                              String body,
                               String origin) throws Exception {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         String reason = status == 200 ? "OK"
@@ -522,12 +619,14 @@ public final class LocalBroker implements Closeable {
                 : status == 404 ? "Not Found"
                 : status == 502 ? "Bad Gateway"
                 : "Error";
+
         StringBuilder headers = new StringBuilder()
                 .append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
                 .append("Content-Type: ").append(type).append("\r\n")
                 .append("Content-Length: ").append(bytes.length).append("\r\n")
                 .append("Cache-Control: no-store\r\n")
                 .append("Connection: close\r\n");
+
         if (UI_ORIGIN.equals(origin)) {
             headers.append("Access-Control-Allow-Origin: ").append(UI_ORIGIN).append("\r\n")
                     .append("Vary: Origin\r\n")
@@ -536,6 +635,7 @@ public final class LocalBroker implements Closeable {
                     .append("Access-Control-Allow-Private-Network: true\r\n");
         }
         headers.append("\r\n");
+
         out.write(headers.toString().getBytes(StandardCharsets.US_ASCII));
         out.write(bytes);
         out.flush();
@@ -544,29 +644,38 @@ public final class LocalBroker implements Closeable {
     @Override
     public void close() {
         running = false;
-        try { if (server != null) server.close(); } catch (Exception ignored) {}
+        try {
+            if (server != null) {
+                server.close();
+            }
+        } catch (Exception ignored) {
+        }
+
         Set<WsClient> snapshot;
         synchronized (lock) {
             snapshot = new HashSet<>(clients);
             clients.clear();
         }
-        for (WsClient client : snapshot) client.closeQuietly();
+        for (WsClient client : snapshot) {
+            client.closeQuietly();
+        }
         workers.shutdownNow();
     }
 
     private static final class Request {
         final String method;
         final String path;
-        final String query;
         final String body;
         final Map<String, String> headers;
         final String origin;
 
-        Request(String method, String path, String query, String body,
-                Map<String, String> headers, String origin) {
+        Request(String method,
+                String path,
+                String body,
+                Map<String, String> headers,
+                String origin) {
             this.method = method;
             this.path = path;
-            this.query = query;
             this.body = body;
             this.headers = headers;
             this.origin = origin;
@@ -575,13 +684,15 @@ public final class LocalBroker implements Closeable {
         boolean isWebSocketUpgrade() {
             return "websocket".equalsIgnoreCase(headers.get("upgrade"))
                     && headers.getOrDefault("connection", "")
-                    .toLowerCase(Locale.ROOT).contains("upgrade");
+                    .toLowerCase(Locale.ROOT)
+                    .contains("upgrade");
         }
     }
 
     private static final class Result {
         final String response;
         final String error;
+
         Result(String response, String error) {
             this.response = response;
             this.error = error;
@@ -592,12 +703,14 @@ public final class LocalBroker implements Closeable {
         final String id;
         final String provider;
         final String prompt;
+
         Command(String id, String provider, String prompt) {
             this.id = id;
             this.provider = provider;
             this.prompt = prompt;
         }
-        JSONObject toJson() {
+
+        JSONObject toJson() throws Exception {
             return new JSONObject()
                     .put("type", "command")
                     .put("id", id)
@@ -610,6 +723,7 @@ public final class LocalBroker implements Closeable {
         final boolean fin;
         final int opcode;
         final byte[] payload;
+
         WsFrame(boolean fin, int opcode, byte[] payload) {
             this.fin = fin;
             this.opcode = opcode;
@@ -638,9 +752,11 @@ public final class LocalBroker implements Closeable {
 
         void sendFrame(int opcode, byte[] payload) throws Exception {
             synchronized (writeLock) {
-                if (!open) throw new EOFException("WebSocket closed");
-                int first = 0x80 | (opcode & 0x0F);
-                out.write(first);
+                if (!open) {
+                    throw new EOFException("WebSocket closed");
+                }
+
+                out.write(0x80 | (opcode & 0x0F));
                 int length = payload.length;
                 if (length < 126) {
                     out.write(length);
@@ -662,7 +778,10 @@ public final class LocalBroker implements Closeable {
 
         void closeQuietly() {
             open = false;
-            try { socket.close(); } catch (Exception ignored) {}
+            try {
+                socket.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 }
