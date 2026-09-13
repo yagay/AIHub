@@ -15,6 +15,7 @@ interface IAiHubService {
     boolean newChat(String clientToken);
     boolean stop(String clientToken);
     boolean attach(String clientToken, in List<String> uriStrings);
+    boolean attachAndSend(String clientToken, in List<String> uriStrings, String text);
     boolean back(String clientToken);
     boolean forward(String clientToken);
     boolean reload(String clientToken);
