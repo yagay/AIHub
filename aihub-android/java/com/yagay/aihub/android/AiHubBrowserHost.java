@@ -8,22 +8,24 @@ import android.webkit.ValueCallback;
 import androidx.annotation.Nullable;
 
 /**
- * Stable Android-side browser boundary.
+ * Stable browser boundary used by AIHub UI and session logic.
  *
- * AIHub UI/runtime depend only on this interface. The Chromium fork adapter is the only code that
- * imports Chrome internal classes such as ChromeTabbedActivity, Tab and TabModelSelector.
+ * Engine-specific details belong in the app-side host implementation. The current main build uses
+ * Android System WebView, while the stable AIHub layers know nothing about WebView internals.
  */
 public interface AiHubBrowserHost {
     Activity activity();
     ViewGroup overlayRoot();
-    @Nullable View chromeControlContainer();
 
-    /** Opens the provider in a retained normal Chrome tab, or selects that tab if it still exists. */
+    /** Optional native browser controls that AIHub can hide/show; null for the WebView app. */
+    @Nullable View browserControlContainer();
+
+    /** Opens a retained provider page, or selects it if it already exists. */
     void openOrSelectProvider(String providerId, String homeUrl);
     void selectProvider(String providerId);
     void closeProvider(String providerId);
 
-    /** Executes AIHub DOM logic in an isolated world of the currently active Chrome tab. */
+    /** Executes generic AIHub DOM logic in the currently active provider page. */
     void evaluateJavaScript(String script, @Nullable ValueCallback<String> callback);
 
     void back();
@@ -35,6 +37,6 @@ public interface AiHubBrowserHost {
     boolean isLoading();
     int loadProgress();
 
-    /** Stable UI/runtime error surface; Chromium adapter decides how it is presented. */
+    /** Stable UI/runtime error surface; the concrete browser host decides how to present it. */
     void onAiHubError(String message);
 }
