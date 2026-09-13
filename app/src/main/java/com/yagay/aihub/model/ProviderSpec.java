@@ -4,7 +4,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 
-/** Immutable description of one AI website. */
+/** Immutable description of one AI website and the controls AIHub exposes for it. */
 public record ProviderSpec(
         String id,
         String name,
@@ -14,7 +14,9 @@ public record ProviderSpec(
         List<String> sendSelectors,
         List<String> newChatSelectors,
         List<String> stopSelectors,
-        List<String> attachmentSelectors) {
+        List<String> attachmentSelectors,
+        List<String> appHideSelectors,
+        List<ProviderAction> appActions) {
 
     public ProviderSpec {
         allowedHosts = copy(allowedHosts);
@@ -23,6 +25,8 @@ public record ProviderSpec(
         newChatSelectors = copy(newChatSelectors);
         stopSelectors = copy(stopSelectors);
         attachmentSelectors = copy(attachmentSelectors);
+        appHideSelectors = copy(appHideSelectors);
+        appActions = List.copyOf(appActions == null ? List.of() : appActions);
     }
 
     public boolean ownsUrl(String url) {
@@ -40,6 +44,14 @@ public record ProviderSpec(
             return false;
         }
         return false;
+    }
+
+    public ProviderAction appAction(String actionId) {
+        if (actionId == null) return null;
+        for (ProviderAction action : appActions) {
+            if (action.id().equals(actionId)) return action;
+        }
+        return null;
     }
 
     private static List<String> copy(List<String> value) {
