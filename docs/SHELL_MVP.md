@@ -1,6 +1,6 @@
 # AIHub Shell MVP
 
-AIHub now uses a provider-only shell: one retained Chromium/WebEngine session per AI provider, with no multi-account or workspace management layer.
+AIHub uses a provider-only shell: one retained Chromium/WebEngine session per AI provider, with no multi-account or workspace management layer.
 
 ## Main UI
 
@@ -29,16 +29,23 @@ persistenceId = aihub_session_<providerId>
 
 The user logs in on the real website. AIHub does not store website passwords or duplicate website session data into its own account model.
 
+The provider container retains a Chromium `TabManager`. AIHub resolves Chromium's current active tab at operation time, so authentication popups/new tabs do not leave the shared AI controls permanently bound to the first tab that was opened.
+
 ## Chromium isolation boundary
 
-The shell and core do not import Chromium APIs directly. Direct WebEngine usage is limited to:
+The shell and core do not import Chromium APIs directly. Direct `org.chromium.webengine.*` usage is limited to one file:
 
 ```text
-WebEngineSessionRuntime.java
 AiWebEngineHost.java
 ```
 
-When Chromium updates, adapt those two files instead of rewriting the AI UI or stable provider/session core.
+`WebEngineSessionRuntime.java` is a stable Chromium-type-free bridge. When Chromium updates, the expected changes are limited to the Host, plus `BUILD.gn`/compatibility signatures if upstream target names or APIs moved.
+
+## Browser capability rule
+
+AIHub changes the shell, not the browser engine. Authentication redirects, permission behavior, camera/microphone, autofill, safe-browsing behavior, downloads and renderer recovery should remain Chromium/WebEngine responsibilities wherever the selected revision supports them.
+
+The host manifest declares common browser capabilities but does not silently grant site permissions. Real behavior is verified using `BROWSER_CAPABILITIES.md` and `INTEGRATION_TEST_CHECKLIST.md`.
 
 ## External-entry security
 
@@ -87,4 +94,4 @@ Then run:
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
-Repository CI verifies the provider-only core and prevents account/workspace abstractions or Chromium imports from leaking back into stable source. The final WebEngine integration still needs a real Chromium Android checkout and physical-device test.
+Repository CI verifies the provider-only core, one-file Chromium Java seam, browser-host architecture and security constraints. The final WebEngine integration still requires a real compatible Chromium Android checkout and physical-device test.
