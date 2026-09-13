@@ -18,7 +18,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Token-gated Binder facade. Browser mutations are routed back through the shell command bus. */
+/** Token-gated Binder facade. Browser mutations are routed through the secure external entry. */
 public final class AiHubBinderService extends Service {
     private AiHubStateStore stateStore;
 
@@ -121,7 +121,7 @@ public final class AiHubBinderService extends Service {
             String text,
             List<String> uris) {
         if (!authorized(token)) return false;
-        Intent intent = new Intent(this, AiHubShellActivity.class)
+        Intent intent = new Intent(this, AiHubEntryActivity.class)
                 .setAction(action)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(AiHubContract.EXTRA_CLIENT_TOKEN, token);
