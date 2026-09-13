@@ -1,152 +1,182 @@
-# Chromium / WebEngine integration
+# Chromium Chrome Android integration
 
-AIHub targets Chromium **WebEngine** while replacing the normal browser shell with an AI-first UI.
+AIHub integrates with the full Chromium Android browser target, not a second embedded browser runtime.
 
-The important design rule is that Chromium remains the website/runtime layer, while AIHub owns provider switching, the shared composer and AI-specific navigation UI.
-
-## Upstream verification first
-
-Before debugging AIHub, verify that the selected Chromium revision can build and run its own WebEngine sample.
-
-Typical Android checkout setup:
-
-```bash
-fetch --nohooks android
-gclient sync
-cd src
-. build/android/envsetup.sh
-gn args out/Default
-```
-
-Use Android GN args, including:
+The output is the normal development browser APK:
 
 ```text
-target_os = "android"
+//chrome/android:chrome_public_apk
+out/Default/apks/ChromePublic.apk
 ```
 
-Then verify the upstream WebEngine sample available in that revision.
+## Why this integration model
 
-## One direct Java API seam
+AIHub's goal is to replace/augment the browser UI for AI workflows while preserving Chromium's own website/browser behavior. Building directly into Chrome means login, cookies, OAuth, downloads, permissions, password/autofill, popups, media and normal tab handling stay on Chromium's normal code paths.
 
-Direct `org.chromium.webengine.*` imports are restricted to exactly one AIHub file:
+## Current upstream seam
+
+The current AIHub bridge depends on a deliberately small Android Java surface:
 
 ```text
-chromium-overlay/java/com/yagay/aihub/chromium/AiWebEngineHost.java
+ChromeTabbedActivity
+ChromeActivity.getTabModelSelector()
+ChromeActivity.getTabCreator(false)
+TabModelSelector
+TabModelUtils
+TabCreator
+TabClosureParams
+Tab
+WebContents.getMainFrame()
+RenderFrameHost.executeJavaScriptInIsolatedWorld()
+IsolatedWorldIds
 ```
 
-`WebEngineSessionRuntime.java` is a stable bridge and intentionally contains no Chromium Java types.
-
-Responsibilities:
-
-```text
-WebEngineSessionRuntime
-- converts provider/session operations into abstract browser-host operations
-- derives deterministic provider profile/persistence IDs
-- builds generic DOM actions
-- remains independent of a Chromium revision
-
-AiWebEngineHost
-- owns WebSandbox / WebFragment / Tab / TabManager usage
-- shows/hides provider browser surfaces
-- restores provider browser state
-- resolves Chromium's current active tab for every browser operation
-- bridges Android files into the current page
-```
-
-Everything else should remain independent of Chromium API details.
-
-## Upgrade rule
-
-When Chromium updates:
-
-```text
-1. run scripts/check_chromium_checkout.py
-2. verify the upstream WebEngine sample
-3. build AIHub
-4. if Java WebEngine API changed, edit AiWebEngineHost.java
-5. if GN target names/dependencies changed, edit chromium-overlay/BUILD.gn
-6. update check_chromium_checkout.py to match the selected upstream API
-7. do not add Chromium-version branches to aihub-core, AI UI or provider rules
-```
-
-Repository validation rejects direct WebEngine imports anywhere except `AiWebEngineHost.java`.
-
-## Current WebEngine surface
-
-AIHub's host currently checks/uses a small public surface including:
-
-- `WebSandbox.create()` and fragment creation
-- `FragmentParams.setProfileName()`
-- `FragmentParams.setPersistenceId()`
-- `WebFragment.getTabManager()`
-- `TabManager.getActiveTab()` / `createTab()`
-- `Tab.executeScript()`
-- `Tab.getNavigationController()`
-- `NavigationController.navigate()` / `goBack()` / `goForward()` / `reload()`
-- `Tab.setActive()` / display-URI access
-- the local WebEngine/WebLayer support target
-
-Run:
+Before patching a checkout run:
 
 ```bash
 python3 scripts/check_chromium_checkout.py /path/to/chromium/src
 ```
 
-## Provider browser containers
+The checker verifies both API symbols and the one source hook anchor AIHub needs.
 
-AIHub uses one retained browser container per provider:
+## The one source hook
+
+`scripts/apply_chrome_overlay.py` locates:
 
 ```text
-profileName   = aihub_provider_<providerId>
-persistenceId = aihub_session_<providerId>
+ChromeTabbedActivity.performPostInflationStartup()
 ```
 
-This is not a multi-account feature. It is only the retained Chromium browser-state container for that AI provider.
+and inserts one fully qualified call immediately after Chromium assigns its control container:
 
-## Active-tab rule
+```java
+com.yagay.aihub.chromium.AiHubChromeHook.attach(this);
+```
 
-Never cache one provider's initial `Tab` and assume it stays correct forever.
+The patcher is idempotent and marker-based. If Chromium moves the anchor, it fails rather than guessing another insertion point.
 
-OAuth, sign-in flows and website popups can change Chromium's active tab. AIHub therefore stores the provider's `TabManager` and resolves `getActiveTab()` at the time of each send, navigation, diagnostic or URL operation. A file upload captures the active tab once at upload start so one upload transaction cannot be split across two tabs.
+`ChromeTabbedActivity2` inherits from `ChromeTabbedActivity`, so the base hook also covers that activity path without a second AIHub implementation.
 
-This rule keeps AIHub's UI attached to the browser surface Chromium currently considers active without creating a second tab/window system in AIHub.
+## Java source integration
 
-## Browser capability policy
+AIHub does not maintain a parallel GN Android application target. The patcher adds these sources to Chromium's existing `chrome_java_sources` list:
 
-The goal is to preserve Chromium/WebEngine website capability while using a different shell. AIHub should not duplicate browser subsystems in provider-specific code.
+```text
+//aihub/aihub-core/src/main/java/**/*.java
+//aihub/aihub-android/java/**/*.java
+//aihub/generated/java/.../AiHubGeneratedRules.java
+//aihub/chromium-overlay/.../AiHubChromeBridge.java
+//aihub/chromium-overlay/.../AiHubChromeHook.java
+```
 
-Features such as authentication redirects, permissions, autofill, safe-browsing behavior, camera/microphone, downloads, file chooser behavior, popup/new-window handling, loading state and renderer recovery are treated as **Chromium integration capabilities**. They should be delegated to the selected WebEngine revision where supported and verified on-device before AIHub adds fallback behavior.
+Only the last two files may know Chromium internals.
 
-See `BROWSER_CAPABILITIES.md` for the verification matrix.
+## Generated provider configuration
 
-## Build AIHub
+Provider JSON stays in the AIHub repository:
+
+```text
+chromium-overlay/assets/aihub/providers/*.json
+```
+
+At overlay time the script validates/compacts those files and generates:
+
+```text
+//aihub/generated/java/com/yagay/aihub/generated/AiHubGeneratedRules.java
+```
+
+The same generated class carries the configured Ed25519 public key. This avoids coupling AIHub to Chromium asset/resource targets.
+
+The stable Android loader accesses that generated class through a tiny reflection boundary, so its source can still be checked outside a Chromium checkout.
+
+## Real Chrome tabs
+
+One AI provider maps to one retained normal tab ID. AIHub does not create one browser profile per provider.
+
+This means all providers use the normal Chrome profile by default and therefore normal Chrome browser capabilities. Website login identity is whatever the user signs into on that site.
+
+Provider switching is a tab selection operation, not a browser-engine swap.
+
+## JavaScript / DOM actions
+
+AIHub resolves the current `Tab`, obtains its current `WebContents` main frame and calls:
+
+```text
+RenderFrameHost.executeJavaScriptInIsolatedWorld(...)
+```
+
+The generic script finds the active AI composer/actions semantically and then uses provider JSON selectors as fallback.
+
+Do not replace this with a provider-specific Java controller unless configuration/semantic resolution genuinely cannot express the website behavior.
+
+## Build flow
+
+Prepare Chromium using the normal Android instructions and create an output directory whose args include:
+
+```text
+target_os = "android"
+```
+
+Then:
 
 ```bash
 bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
 ```
 
-Or build + install:
-
-```bash
-bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
-```
-
-The scripts validate the repository, check the selected Chromium API surface, sync AIHub to `chromium/src/aihub`, resolve the GN target and build the local target.
-
-## Debugging classification
+This performs:
 
 ```text
-upstream WebEngine sample fails
-→ Chromium/device/environment problem
-
-upstream sample works, compatibility check fails
-→ adapt AiWebEngineHost.java / GN wiring / checker
-
-compatibility passes, GN target fails
-→ AIHub BUILD.gn/dependency issue
-
-build succeeds, runtime fails
-→ capture AIHub diagnostics + logcat and fix host/runtime integration behavior
+AIHub repo validation
+→ Chromium seam compatibility check
+→ sync repository to //aihub
+→ generate provider rules
+→ patch chrome_java_sources.gni
+→ patch one ChromeTabbedActivity hook
+→ gn desc //chrome/android:chrome_public_apk
+→ autoninja chrome_public_apk
 ```
 
-Provider rules, `SessionManager`, `AiCommandBus`, `WebEngineSessionRuntime` and the AI-first UI should not change just because Chromium changed an embedding API.
+Install/launch:
+
+```bash
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default [DEVICE_SERIAL]
+```
+
+The install script uses Chromium's generated `out/Default/bin/chrome_public_apk` runner.
+
+## Upgrade procedure
+
+For each Chromium revision:
+
+```text
+1. sync/update Chromium normally
+2. run check_chromium_checkout.py before applying the overlay
+3. if green, run build_aihub_chromium.sh
+4. if checker fails, compare only the reported upstream API/anchor
+5. adapt AiHubChromeBridge or apply_chrome_overlay.py
+6. update checker to the newly verified surface
+7. do not add revision conditionals to aihub-core/aihub-android
+```
+
+## Failure classification
+
+```text
+check_chromium_checkout.py fails
+→ Chromium API/hook surface moved; adapt the seam
+
+overlay script fails
+→ source-list or ChromeTabbedActivity patch anchor moved
+
+chrome_public_apk compile fails in AIHub source
+→ bridge/API mismatch or stable-source Java issue
+
+build succeeds but normal Chrome features fail without AIHub interaction
+→ upstream Chromium/build/device issue
+
+build succeeds; AI switching/DOM actions fail
+→ AIHub bridge/rule/runtime issue
+```
+
+## Verification boundary
+
+Repository CI cannot substitute for a real Chromium build. A revision becomes "integration tested" only after `chrome_public_apk` compiles and the device checklist passes on that specific revision/device.
