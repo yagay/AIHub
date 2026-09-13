@@ -97,6 +97,12 @@ public final class AiHubBinderService extends Service {
             return start(token, AiHubContract.ACTION_ATTACH, null, null, null, null,
                     uriStrings == null ? List.of() : uriStrings);
         }
+
+        @Override
+        public boolean attachAndSend(String token, List<String> uriStrings, String text) {
+            return start(token, AiHubContract.ACTION_ATTACH, null, null, null, text,
+                    uriStrings == null ? List.of() : uriStrings);
+        }
     };
 
     @Override
