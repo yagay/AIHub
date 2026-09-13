@@ -21,12 +21,7 @@ import com.yagay.aihub.core.provider.ProviderRegistry;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * AI-first Android shell drawn over the real Chrome tabbed activity.
- *
- * It intentionally contains no Chromium imports. Chrome remains responsible for the actual page,
- * login, cookies, permissions, downloads, popups, media and browser lifecycle.
- */
+/** AI-first Android shell drawn over a browser host. */
 public final class AiHubUiCoordinator {
     private static final String ROOT_TAG = "AIHUB_OVERLAY_ROOT";
 
@@ -41,7 +36,7 @@ public final class AiHubUiCoordinator {
     private LinearLayout providerRail;
     private TextView currentProvider;
     private EditText composer;
-    private boolean chromeControlsVisible;
+    private boolean browserControlsVisible;
 
     private AiHubUiCoordinator(
             AiHubBrowserHost host,
@@ -54,14 +49,14 @@ public final class AiHubUiCoordinator {
         this.sessions = new SessionManager(providers, runtime);
     }
 
-    /** Normal Chromium entry: generated JSON rules + custom providers + signed overrides. */
+    /** Normal entry: packaged JSON rules + custom providers + signed overrides. */
     public static AiHubUiCoordinator attachConfigured(AiHubBrowserHost host) {
         AiHubStateStore stateStore = new AiHubStateStore(host.activity());
         ProviderRegistry providers = new ProviderRuleLoader(stateStore).load();
         return attach(host, providers, stateStore);
     }
 
-    /** Fallback/testing entry that needs no generated build rule class. */
+    /** Fallback/testing entry that needs no packaged provider rules. */
     public static AiHubUiCoordinator attachDefault(AiHubBrowserHost host) {
         return attach(
                 host,
@@ -95,27 +90,25 @@ public final class AiHubUiCoordinator {
         if (overlay != null && overlay.getParent() instanceof ViewGroup parent) {
             parent.removeView(overlay);
         }
-        showChromeControls(true);
+        showBrowserControls(true);
     }
 
     private void attach() {
-        ViewGroup chromeRoot = host.overlayRoot();
-        View old = chromeRoot.findViewWithTag(ROOT_TAG);
-        if (old != null) chromeRoot.removeView(old);
+        ViewGroup browserRoot = host.overlayRoot();
+        View old = browserRoot.findViewWithTag(ROOT_TAG);
+        if (old != null) browserRoot.removeView(old);
 
         overlay = new FrameLayout(host.activity());
         overlay.setTag(ROOT_TAG);
         overlay.setClickable(false);
-        chromeRoot.addView(overlay, new ViewGroup.LayoutParams(
+        browserRoot.addView(overlay, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         buildTopBar();
         buildComposer();
 
-        // AIHub replaces the normal toolbar by default, but Chrome's controls remain alive and can
-        // be restored instantly from the AIHub top bar.
-        showChromeControls(false);
+        if (host.chromeControlContainer() != null) showBrowserControls(false);
 
         if (!providers.all().isEmpty()) {
             String saved = stateStore.savedProviderId();
@@ -143,7 +136,9 @@ public final class AiHubUiCoordinator {
         nav.addView(currentProvider, new LinearLayout.LayoutParams(0, dp(42), 1f));
 
         nav.addView(button("＋", ignored -> sessions.newChat()));
-        nav.addView(button("Chrome", ignored -> showChromeControls(!chromeControlsVisible)));
+        if (host.chromeControlContainer() != null) {
+            nav.addView(button("Browser", ignored -> showBrowserControls(!browserControlsVisible)));
+        }
         top.addView(nav, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
 
@@ -210,9 +205,9 @@ public final class AiHubUiCoordinator {
         Button item = button(provider.displayName(), ignored -> activate(provider.id()));
         item.setAllCaps(false);
         providerButtons.put(provider.id(), item);
-        // Keep the Add AI button last when adding a custom provider after initial construction.
         int index = providerRail.getChildCount();
-        if (index > 0 && "＋ AI".contentEquals(((Button) providerRail.getChildAt(index - 1)).getText())) {
+        if (index > 0 && providerRail.getChildAt(index - 1) instanceof Button last
+                && "＋ AI".contentEquals(last.getText())) {
             index--;
         }
         providerRail.addView(item, index, new LinearLayout.LayoutParams(
@@ -290,8 +285,8 @@ public final class AiHubUiCoordinator {
         return button;
     }
 
-    private void showChromeControls(boolean show) {
-        chromeControlsVisible = show;
+    private void showBrowserControls(boolean show) {
+        browserControlsVisible = show;
         View controls = host.chromeControlContainer();
         if (controls != null) {
             controls.setVisibility(show ? View.VISIBLE : View.GONE);
