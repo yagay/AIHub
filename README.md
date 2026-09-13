@@ -36,7 +36,8 @@ Provider-specific branches are intentionally kept out of the stable core. Provid
 - provider diagnostics and JSON diagnostics export without cookies/tokens/site storage
 - JSON provider rules and selector health probing
 - Ed25519-signed provider rule bundles with versioning and rollback
-- token-gated Intent, deep-link and AIDL/Binder integrations
+- token-gated unattended Intent and AIDL/Binder integrations
+- tokenless deep links with explicit user confirmation
 - Android share confirmation before using a logged-in AI session
 - guarded exported `AiHubEntryActivity`; the real `AiHubShellActivity` is unexported
 - GitHub Actions validation and core smoke tests
@@ -92,9 +93,9 @@ bash scripts/install_aihub_local.sh /path/to/chromium/src out/Default
 
 ## Third-party calls
 
-Automatic external actions require the local client token shown under AIHub Tools. Ordinary Android shares do not need the token, but require user confirmation before content is sent.
+Unattended external actions use the local client token shown under AIHub Tools. Put that token in Intent extras or use the token-gated Binder API; do not put the token in URLs.
 
-Example:
+Automatic Intent example:
 
 ```bash
 adb shell am start \
@@ -104,7 +105,13 @@ adb shell am start \
   --es client_token YOUR_TOKEN
 ```
 
-Third-party integrations never receive WebEngine cookies, login tokens, localStorage or IndexedDB data.
+Deep links are intentionally tokenless and require user confirmation:
+
+```text
+aihub://send?provider=gemini&text=hello
+```
+
+Ordinary Android shares also require user confirmation. Third-party integrations never receive WebEngine cookies, login tokens, localStorage or IndexedDB data.
 
 ## Signed provider rules
 
@@ -120,7 +127,7 @@ python3 scripts/build_signed_rule_bundle.py \
   --output provider-rules-v2.json
 ```
 
-If no public key is configured, signed-rule installation remains disabled rather than falling back to unsigned updates.
+`openssl` must be available in `PATH`. If no public key is configured, signed-rule installation remains disabled rather than falling back to unsigned updates.
 
 ## Current verification boundary
 
