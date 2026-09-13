@@ -15,5 +15,6 @@ public class GenericWebProviderAdapter implements AiProviderAdapter {
     @Override public String sendScript(String text) { return DomBridge.send(spec, text); }
     @Override public String newChatScript() { return DomBridge.newChat(spec); }
     @Override public String stopScript() { return DomBridge.stop(spec); }
-    @Override public String appModeScript(boolean enabled) { return DomBridge.appMode(spec, enabled); }
+    @Override public String attachmentScript() { return DomBridge.attachment(spec); }
+    @Override public String conversationScript() { return DomBridge.conversation(spec); }
 }
