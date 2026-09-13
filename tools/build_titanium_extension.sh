@@ -22,6 +22,6 @@ test -s "$OUT/content.js"
 
 # Runtime updater compares this content hash with Titanium's installed copy.
 BUILD_ID="$(cat "$OUT/manifest.json" "$OUT/service-worker.js" "$OUT/content.js" | sha256sum | awk '{print $1}')"
-printf '%s\n' "$BUILD_ID" > "$OUT/.aihub-build-id"
+printf '%s\n' "$BUILD_ID" > "$OUT/AIHUB_BUILD_ID"
 
 echo "Built Titanium extension $BUILD_ID from Prometheus@$PROMETHEUS_COMMIT (Browser-Tab mode only)"
