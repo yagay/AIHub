@@ -41,9 +41,10 @@ public final class GenericDomScriptFactory {
             """;
     }
 
-    /** Fallback used for URI-based Android shares; normal in-app attachment uses Chromium chooser. */
+    /** Initializes the fallback Android-share file bridge in the isolated world. */
     public static String uploadInit(int fileCount) {
-        return "window.__aihubUpload={files:Array.from({length:%d},()=>({name:'',type:'',b64:''}))};'ok'".formatted(fileCount);
+        return "window.__aihubUpload={files:Array.from({length:%d},()=>({name:'',type:'',b64:''}))};'ok'"
+                .formatted(fileCount);
     }
 
     public static String uploadAppend(int index, String name, String mime, String base64Chunk) {
@@ -52,6 +53,7 @@ public final class GenericDomScriptFactory {
             """.formatted(index, index, jsString(name), jsString(mime), jsString(base64Chunk));
     }
 
+    /** Commits fallback shared files to the page's real input[type=file]. */
     public static String uploadCommit() {
         return """
             (()=>{try{const u=window.__aihubUpload;if(!u)return JSON.stringify({ok:false,stage:'buffer'});const input=[...document.querySelectorAll('input[type="file"]')].find(el=>!el.disabled);if(!input)return JSON.stringify({ok:false,stage:'file-input'});const dt=new DataTransfer();for(const rec of u.files){const bin=atob(rec.b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);dt.items.add(new File([bytes],rec.name||'upload.bin',{type:rec.type||'application/octet-stream'}));}input.files=dt.files;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));delete window.__aihubUpload;return JSON.stringify({ok:true,count:dt.files.length});}catch(e){delete window.__aihubUpload;return JSON.stringify({ok:false,stage:'commit',error:String(e)});}})()
