@@ -2,7 +2,6 @@ package com.yagay.aihub.titanium;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
-import android.os.UserHandle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -109,13 +108,13 @@ public final class TitaniumManager {
      * Resolve the directory from the filesystem under Root instead of assuming /data/user/0.
      */
     private String resolveTitaniumDataDir(ApplicationInfo info) throws Exception {
-        int appUser = UserHandle.myUserId();
+        int uidDerivedUser = android.os.Process.myUid() / 100000;
         String declared = info.dataDir == null ? "" : info.dataDir.trim();
 
         String currentUser = runSu("cmd activity get-current-user 2>/dev/null || am get-current-user 2>/dev/null || echo "
-                + appUser, 5).trim();
+                + uidDerivedUser, 5).trim();
         if (currentUser.isEmpty() || !currentUser.matches("\\d+")) {
-            currentUser = String.valueOf(appUser);
+            currentUser = String.valueOf(uidDerivedUser);
         }
 
         StringBuilder probe = new StringBuilder();
