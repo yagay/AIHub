@@ -20,23 +20,37 @@ public final class MainActivity extends ComponentActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        titanium = new TitaniumManager(this);
-        broker = new LocalBroker(titanium::launchProvider);
-        broker.start();
-
         ui = new UiHost(this);
         setContentView(ui.view());
         ui.start();
 
+        titanium = new TitaniumManager(this);
+        broker = new LocalBroker(titanium::launchProvider);
+        broker.start();
+
+        ui.showStatus("AIHub UI 正在加载…\n正在申请 Root 并准备 Titanium 扩展…", false);
         titanium.prepareAsync(new TitaniumManager.Callback() {
-            @Override public void onReady() {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "Titanium bridge ready", Toast.LENGTH_SHORT).show());
+            @Override
+            public void onReady() {
+                runOnUiThread(() -> {
+                    ui.showTransientStatus("Root 已授权 · Titanium 扩展已准备");
+                    Toast.makeText(MainActivity.this,
+                            "Root/Titanium ready", Toast.LENGTH_SHORT).show();
+                });
             }
 
-            @Override public void onError(Throwable error) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "Titanium bridge: " + error.getMessage(), Toast.LENGTH_LONG).show());
+            @Override
+            public void onError(Throwable error) {
+                runOnUiThread(() -> {
+                    String message = error == null || error.getMessage() == null
+                            ? String.valueOf(error)
+                            : error.getMessage();
+                    ui.showFatal("Root / Titanium 初始化失败\n\n" + message
+                            + "\n\n请确认 KernelSU/Root 已授权 AIHub，并已安装 Titanium Browser。\n"
+                            + "修复后重新打开 AIHub。");
+                    Toast.makeText(MainActivity.this,
+                            "Root/Titanium failed: " + message, Toast.LENGTH_LONG).show();
+                });
             }
         });
 
