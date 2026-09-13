@@ -21,6 +21,7 @@ public final class AiHubStateStore {
     private static final String KEY_PREVIOUS_REMOTE_RULE_BUNDLE = "previous_remote_rule_bundle";
     private static final String KEY_PROVIDER = "current_provider";
     private static final String KEY_CLIENT_TOKEN = "client_token";
+    private static final String KEY_APP_MODE = "app_mode_enabled";
 
     private final Context context;
     private final SharedPreferences prefs;
@@ -116,6 +117,15 @@ public final class AiHubStateStore {
 
     public String savedProviderId() {
         return prefs.getString(KEY_PROVIDER, null);
+    }
+
+    /** App mode replaces common website chrome/composer controls with AIHub's native controls. */
+    public boolean appModeEnabled() {
+        return prefs.getBoolean(KEY_APP_MODE, true);
+    }
+
+    public void saveAppModeEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_APP_MODE, enabled).apply();
     }
 
     public String clientToken() {
