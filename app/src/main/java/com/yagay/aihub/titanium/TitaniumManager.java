@@ -2,6 +2,7 @@ package com.yagay.aihub.titanium;
 
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.os.UserHandle;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -34,6 +35,7 @@ public final class TitaniumManager {
     private volatile boolean prepared;
     private volatile boolean browserBootstrapped;
     private String extensionDestination;
+    private String titaniumDataDir;
 
     public TitaniumManager(Context context) {
         this.context = context.getApplicationContext();
@@ -61,10 +63,9 @@ public final class TitaniumManager {
         } catch (Exception error) {
             throw new IllegalStateException("Titanium Browser 未安装（需要包名 " + PACKAGE + "）", error);
         }
-        if (info.dataDir == null || info.dataDir.trim().isEmpty()) {
-            throw new IllegalStateException("无法解析 Titanium 数据目录");
-        }
-        extensionDestination = info.dataDir + EXTENSION_RELATIVE_PATH;
+
+        titaniumDataDir = resolveTitaniumDataDir(info);
+        extensionDestination = titaniumDataDir + EXTENSION_RELATIVE_PATH;
 
         File source = new File(context.getFilesDir(), "titanium-extension");
         delete(source);
@@ -76,8 +77,8 @@ public final class TitaniumManager {
         String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();
         if (expectedBuild.isEmpty()) throw new IllegalStateException("APK 内扩展 build marker 缺失");
 
-        String uid = runSu("stat -c %u " + q(info.dataDir), 10).trim();
-        if (uid.isEmpty()) throw new IllegalStateException("无法读取 Titanium UID");
+        String uid = runSu("stat -c %u " + q(titaniumDataDir), 10).trim();
+        if (uid.isEmpty()) throw new IllegalStateException("无法读取 Titanium UID：" + titaniumDataDir);
 
         String installedBuild = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE)
                 + " 2>/dev/null || true", 8).trim();
@@ -97,9 +98,68 @@ public final class TitaniumManager {
 
         String installedCheck = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE), 8).trim();
         if (!expectedBuild.equals(installedCheck)) {
-            throw new IllegalStateException("Root 已授权，但 Titanium 扩展写入校验失败");
+            throw new IllegalStateException("Root 已授权，但 Titanium 扩展写入校验失败：" + extensionDestination);
         }
         prepared = true;
+    }
+
+    /**
+     * ApplicationInfo.dataDir is normally correct, but on some ROMs PackageManager can return
+     * a path for user 0 even when the package was installed/initialized in another Android user.
+     * Resolve the directory from the filesystem under Root instead of assuming /data/user/0.
+     */
+    private String resolveTitaniumDataDir(ApplicationInfo info) throws Exception {
+        int appUser = UserHandle.myUserId();
+        String declared = info.dataDir == null ? "" : info.dataDir.trim();
+
+        String currentUser = runSu("cmd activity get-current-user 2>/dev/null || am get-current-user 2>/dev/null || echo "
+                + appUser, 5).trim();
+        if (currentUser.isEmpty() || !currentUser.matches("\\d+")) {
+            currentUser = String.valueOf(appUser);
+        }
+
+        StringBuilder probe = new StringBuilder();
+        if (!declared.isEmpty()) {
+            probe.append("for d in ").append(q(declared)).append(' ');
+        } else {
+            probe.append("for d in ");
+        }
+        probe.append(q("/data/user/" + currentUser + "/" + PACKAGE)).append(' ')
+                .append(q("/data/data/" + PACKAGE)).append("; do ")
+                .append("[ -d \"$d\" ] && { printf '%s' \"$d\"; exit 0; }; done; ")
+                .append("exit 0");
+
+        String found = runSu(probe.toString(), 8).trim();
+        if (!found.isEmpty()) {
+            return found;
+        }
+
+        // The package may have just been installed but never launched in this user. Start it once
+        // so Android/Chromium can initialize its credential-encrypted data directory, then retry.
+        String init = "am start --user " + currentUser
+                + " -a android.intent.action.VIEW -d 'about:blank' -p " + PACKAGE
+                + " >/dev/null 2>&1 || monkey --user " + currentUser + " -p " + PACKAGE
+                + " -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true; sleep 2";
+        runSu(init, 8);
+
+        found = runSu(probe.toString(), 8).trim();
+        if (!found.isEmpty()) {
+            return found;
+        }
+
+        // Last-resort diagnostic: find the package under any Android user. We do not silently use
+        // another user's private data because AIHub and Titanium could not communicate reliably.
+        String anywhere = runSu("for d in /data/user/*/" + PACKAGE + "; do "
+                + "[ -d \"$d\" ] && printf '%s\\n' \"$d\"; done", 8).trim();
+        if (!anywhere.isEmpty()) {
+            throw new IllegalStateException("Titanium 已安装，但不在 AIHub 当前用户 " + currentUser
+                    + " 的数据空间。检测到: " + anywhere.replace('\n', ' ')
+                    + "。请把 AIHub 与 Titanium 安装在同一个 Android 用户/主空间。");
+        }
+
+        throw new IllegalStateException("Titanium 包已安装，但当前用户 " + currentUser
+                + " 没有创建应用数据目录。请先手动打开 Titanium 一次，再重新打开 AIHub。"
+                + (declared.isEmpty() ? "" : " PackageManager 路径: " + declared));
     }
 
     private void assertRoot() throws Exception {
