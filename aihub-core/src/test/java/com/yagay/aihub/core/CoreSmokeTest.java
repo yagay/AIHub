@@ -62,6 +62,20 @@ public final class CoreSmokeTest {
         check(bus.execute(AiCommand.attachAndSend(
                 List.of("content://example/b.png"), "describe this image")).success(), "attach and send");
 
+        AiAccount renamed = sessions.renameAccount("claude_work", "Office");
+        check("Office".equals(renamed.label()), "rename account");
+        sessions.removeAccount("claude_personal");
+        check(!accounts.contains("claude_personal"), "remove non-current account");
+        check("claude_work".equals(workspaces.require("personal").accountFor("claude")),
+                "workspace remapped after account removal");
+        boolean rejectedLastAccountRemoval = false;
+        try {
+            sessions.removeAccount("claude_work");
+        } catch (IllegalStateException expected) {
+            rejectedLastAccountRemoval = true;
+        }
+        check(rejectedLastAccountRemoval, "last provider account cannot be removed");
+
         check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_personal:hello")), "send event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("back:claude:claude_work")), "back event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:claude:claude_work")), "forward event");
