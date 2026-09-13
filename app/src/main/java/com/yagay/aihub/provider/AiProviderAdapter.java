@@ -12,5 +12,5 @@ public interface AiProviderAdapter {
     JSONObject newChatCommand();
     JSONObject stopCommand();
     JSONObject attachmentCommand();
-    JSONObject syncCommand();
+    JSONObject presentationCommand(boolean appMode);
 }
