@@ -67,6 +67,7 @@ for index, provider in enumerate(providers):
             raise SystemExit(f"provider {provider_id} has a non-object APP action")
         action_id = str(action.get("id", "")).strip()
         label = str(action.get("label", "")).strip()
+        pick = str(action.get("pick", "first")).strip()
         action_selectors = action.get("selectors", [])
         keywords = action.get("keywords", [])
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", action_id):
@@ -76,6 +77,8 @@ for index, provider in enumerate(providers):
         action_ids.add(action_id)
         if not label:
             raise SystemExit(f"provider {provider_id} APP action {action_id} has no label")
+        if pick not in ("first", "last"):
+            raise SystemExit(f"provider {provider_id} APP action {action_id} pick must be first or last")
         if not isinstance(action_selectors, list) or not all(isinstance(x, str) and x.strip() for x in action_selectors):
             raise SystemExit(f"provider {provider_id} APP action {action_id} selectors must be a string array")
         if not isinstance(keywords, list) or not all(isinstance(x, str) and x.strip() for x in keywords):
