@@ -37,6 +37,12 @@
     <string name="export_diagnostics">Export diagnostics JSON</string>
     <string name="diagnostics_saved">Diagnostics saved</string>
     <string name="diagnostics_export_failed">Could not save diagnostics</string>
+    <string name="import_signed_rules">Import signed provider rules</string>
+    <string name="rollback_rules">Rollback provider rules</string>
+    <string name="rules_installed">Provider rules installed (version %1$d).</string>
+    <string name="rules_rolled_back">Provider rules rolled back.</string>
+    <string name="no_rules_rollback">No previous signed rule bundle is available.</string>
+    <string name="rules_update_failed">Provider rule update failed: %1$s</string>
     <string name="integration_token">Third-party client token</string>
     <string name="rotate_token">Rotate third-party token</string>
     <string name="rotate_token_warning">Existing third-party integrations will stop working until they use the new token.</string>
