@@ -45,9 +45,10 @@ public final class MainActivity extends ComponentActivity {
                     String message = error == null || error.getMessage() == null
                             ? String.valueOf(error)
                             : error.getMessage();
-                    ui.showFatal("Root / Titanium 初始化失败\n\n" + message
-                            + "\n\n请确认 KernelSU/Root 已授权 AIHub，并已安装 Titanium Browser。\n"
-                            + "修复后重新打开 AIHub。");
+                    ui.showDismissibleWarning("Root / Titanium 自动安装失败\n\n" + message
+                            + "\n\nAIHub UI 仍可使用。请确认 KernelSU/Root 已授权 AIHub、已安装 Titanium Browser；"
+                            + "也可以在 Titanium 的 chrome://extensions 中手动 Load unpacked。\n"
+                            + "下一次启动 AIHub 会再次尝试自动安装。");
                     Toast.makeText(MainActivity.this,
                             "Root/Titanium failed: " + message, Toast.LENGTH_LONG).show();
                 });
