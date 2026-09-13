@@ -1,8 +1,8 @@
 package com.yagay.aihub.core.runtime;
 
-import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.AiSessionKey;
 import com.yagay.aihub.core.ProviderConfig;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,9 +13,7 @@ public final class RecordingSessionRuntime implements SessionRuntime {
 
     public List<String> events() { return Collections.unmodifiableList(events); }
 
-    @Override public void open(AiSessionKey key, ProviderConfig provider, AiAccount account) {
-        events.add("open:" + key + ":profile=" + account.profileName());
-    }
+    @Override public void open(AiSessionKey key, ProviderConfig provider) { events.add("open:" + key); }
     @Override public void activate(AiSessionKey key) { events.add("activate:" + key); }
     @Override public void close(AiSessionKey key) { events.add("close:" + key); }
     @Override public void sendText(AiSessionKey key, String text) { events.add("send:" + key + ":" + text); }
