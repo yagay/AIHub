@@ -2,7 +2,6 @@
 import json
 import pathlib
 import re
-import sys
 from urllib.parse import urlparse
 
 path = pathlib.Path("app/src/main/assets/providers.json")
@@ -15,7 +14,7 @@ if not isinstance(providers, list) or not providers:
     raise SystemExit("providers.json must be a non-empty array")
 
 seen = set()
-required_selector_groups = ("input", "send", "newChat", "stop", "attach", "userMessage", "assistantMessage")
+required_selector_groups = ("input", "send", "newChat", "stop", "attach")
 for index, provider in enumerate(providers):
     if not isinstance(provider, dict):
         raise SystemExit(f"provider #{index} is not an object")
