@@ -31,6 +31,7 @@ public class GenericWebProviderAdapter implements AiProviderAdapter {
         JSONObject command = command("uiAction", null, null);
         try {
             command.put("uiActionId", action.id());
+            command.put("actionPick", action.pick());
             command.put("actionSelectors", array(action.selectors()));
             command.put("actionKeywords", array(action.keywords()));
         } catch (Exception error) {
