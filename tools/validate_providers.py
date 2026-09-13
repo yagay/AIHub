@@ -23,6 +23,7 @@ for index, provider in enumerate(providers):
     home_url = str(provider.get("homeUrl", "")).strip()
     hosts = provider.get("hosts")
     selectors = provider.get("selectors")
+    ui = provider.get("ui", {})
 
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", provider_id):
         raise SystemExit(f"invalid provider id: {provider_id!r}")
@@ -50,5 +51,36 @@ for index, provider in enumerate(providers):
             raise SystemExit(f"provider {provider_id} selector group {group} must be a string array")
     if not selectors["input"]:
         raise SystemExit(f"provider {provider_id} must define at least one input selector")
+
+    if not isinstance(ui, dict):
+        raise SystemExit(f"provider {provider_id} ui must be an object")
+    hidden = ui.get("hide", [])
+    if not isinstance(hidden, list) or not all(isinstance(x, str) and x.strip() for x in hidden):
+        raise SystemExit(f"provider {provider_id} ui.hide must be a string array")
+
+    actions = ui.get("actions", [])
+    if not isinstance(actions, list):
+        raise SystemExit(f"provider {provider_id} ui.actions must be an array")
+    action_ids = set()
+    for action in actions:
+        if not isinstance(action, dict):
+            raise SystemExit(f"provider {provider_id} has a non-object APP action")
+        action_id = str(action.get("id", "")).strip()
+        label = str(action.get("label", "")).strip()
+        action_selectors = action.get("selectors", [])
+        keywords = action.get("keywords", [])
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", action_id):
+            raise SystemExit(f"provider {provider_id} has invalid APP action id: {action_id!r}")
+        if action_id in action_ids:
+            raise SystemExit(f"provider {provider_id} has duplicate APP action: {action_id}")
+        action_ids.add(action_id)
+        if not label:
+            raise SystemExit(f"provider {provider_id} APP action {action_id} has no label")
+        if not isinstance(action_selectors, list) or not all(isinstance(x, str) and x.strip() for x in action_selectors):
+            raise SystemExit(f"provider {provider_id} APP action {action_id} selectors must be a string array")
+        if not isinstance(keywords, list) or not all(isinstance(x, str) and x.strip() for x in keywords):
+            raise SystemExit(f"provider {provider_id} APP action {action_id} keywords must be a string array")
+        if not action_selectors and not keywords:
+            raise SystemExit(f"provider {provider_id} APP action {action_id} needs selectors or keywords")
 
 print(f"Validated {len(providers)} providers: " + ", ".join(sorted(seen)))
