@@ -10,7 +10,6 @@ import androidx.activity.ComponentActivity;
 import com.yagay.aihub.data.AccountRepository;
 import com.yagay.aihub.data.AppPreferences;
 import com.yagay.aihub.model.AccountProfile;
-import com.yagay.aihub.model.ChatMessage;
 import com.yagay.aihub.model.ProviderSpec;
 import com.yagay.aihub.provider.AiProviderAdapter;
 import com.yagay.aihub.provider.ProviderRegistry;
@@ -19,7 +18,7 @@ import com.yagay.aihub.session.WebSessionManager;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Coordinates native UI, provider configuration, accounts and retained Gecko sessions. */
+/** Coordinates native chrome, providers, accounts and the single live Gecko conversation surface. */
 public final class MainController implements MainScreen.Callback, WebSessionManager.Events {
     private final ComponentActivity activity;
     private final ProviderRegistry providers;
@@ -46,8 +45,8 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
         for (AiProviderAdapter adapter : providers.all()) specs.add(adapter.spec());
         screen.setProviders(specs);
 
-        // WEB is always the safe startup state. APP is enabled only after the live page passes a
-        // capability probe, so login/verification pages can never be hidden behind an empty shell.
+        // Start with the complete official website. APP mode is enabled only after the live page
+        // confirms that its composer is controllable through the shared bridge.
         preferences.setAppModeEnabled(false);
         screen.showAppMode(false);
 
@@ -115,12 +114,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
 
     @Override
     public void onPageReady() {
-        // Capability probing and conversation synchronization are owned by WebSessionManager.
-    }
-
-    @Override
-    public void onConversationChanged(List<ChatMessage> messages) {
-        screen.showMessages(messages);
+        // Bridge readiness and APP capability probing are owned by WebSessionManager.
     }
 
     @Override
