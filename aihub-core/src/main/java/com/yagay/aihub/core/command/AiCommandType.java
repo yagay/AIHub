@@ -6,6 +6,7 @@ public enum AiCommandType {
     NEW_CHAT,
     STOP,
     ATTACH,
+    ATTACH_AND_SEND,
     BACK,
     FORWARD,
     RELOAD,
