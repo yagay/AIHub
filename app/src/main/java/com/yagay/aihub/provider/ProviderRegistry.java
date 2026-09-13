@@ -21,13 +21,16 @@ public final class ProviderRegistry {
 
     public ProviderRegistry(Context context) {
         for (ProviderSpec spec : loadSpecs(context)) {
+            validate(spec);
             register(new GenericWebProviderAdapter(spec));
         }
         if (adapters.isEmpty()) throw new IllegalStateException("No AI providers configured");
     }
 
     public void register(AiProviderAdapter adapter) {
-        adapters.put(adapter.spec().id(), adapter);
+        String id = adapter.spec().id();
+        if (adapters.containsKey(id)) throw new IllegalArgumentException("Duplicate provider: " + id);
+        adapters.put(id, adapter);
     }
 
     public AiProviderAdapter require(String providerId) {
@@ -57,17 +60,37 @@ public final class ProviderRegistry {
                 JSONObject item = array.getJSONObject(i);
                 JSONObject selectors = item.optJSONObject("selectors");
                 out.add(new ProviderSpec(
-                        item.getString("id"),
-                        item.getString("name"),
-                        item.getString("homeUrl"),
+                        item.getString("id").trim(),
+                        item.getString("name").trim(),
+                        item.getString("homeUrl").trim(),
+                        strings(item, "hosts"),
                         strings(selectors, "input"),
                         strings(selectors, "send"),
                         strings(selectors, "newChat"),
-                        strings(selectors, "stop")));
+                        strings(selectors, "stop"),
+                        strings(selectors, "attach"),
+                        strings(selectors, "userMessage"),
+                        strings(selectors, "assistantMessage")));
             }
             return out;
         } catch (Exception error) {
             throw new IllegalStateException("Cannot load providers.json", error);
+        }
+    }
+
+    private static void validate(ProviderSpec spec) {
+        if (!spec.id().matches("[a-z0-9][a-z0-9_-]*")) {
+            throw new IllegalStateException("Invalid provider id: " + spec.id());
+        }
+        if (spec.name().isBlank()) throw new IllegalStateException("Provider name is empty: " + spec.id());
+        if (!spec.homeUrl().startsWith("https://")) {
+            throw new IllegalStateException("Provider homeUrl must use HTTPS: " + spec.id());
+        }
+        if (spec.allowedHosts().isEmpty() || !spec.ownsUrl(spec.homeUrl())) {
+            throw new IllegalStateException("Provider hosts do not own homeUrl: " + spec.id());
+        }
+        if (spec.inputSelectors().isEmpty()) {
+            throw new IllegalStateException("Provider has no input selector: " + spec.id());
         }
     }
 
