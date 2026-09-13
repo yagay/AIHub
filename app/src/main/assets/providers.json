@@ -9,9 +9,7 @@
       "send": ["button[data-testid='send-button']", "button[aria-label*='Send']"],
       "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
       "stop": ["button[data-testid='stop-button']", "button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-message-author-role='user']"],
-      "assistantMessage": ["[data-message-author-role='assistant']"]
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
     }
   },
   {
@@ -24,9 +22,7 @@
       "send": ["button[aria-label*='Send']", "button[type='submit']"],
       "newChat": ["a[href='/new']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-testid='user-message']", "[data-testid='human-message']"],
-      "assistantMessage": [".font-claude-response", "[data-testid='ai-message']", "[data-testid='message-assistant']"]
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
     }
   },
   {
@@ -39,9 +35,7 @@
       "send": ["button[aria-label*='Send']", "button[aria-label*='submit']", "button[type='submit']"],
       "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"],
-      "userMessage": ["user-query .query-text", "user-query", ".user-query-content"],
-      "assistantMessage": ["model-response .model-response-text", "model-response"]
+      "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"]
     }
   },
   {
@@ -54,9 +48,7 @@
       "send": ["button[aria-label*='Send']", "button[type='submit']"],
       "newChat": ["[data-testid='new-chat']", "a[href='/']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["[data-testid='attach-button']", "input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-testid='user-message']", "[data-message-author-role='user']"],
-      "assistantMessage": ["[data-testid='assistant-message']", "[data-message-author-role='assistant']"]
+      "attach": ["[data-testid='attach-button']", "input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
     }
   },
   {
@@ -69,9 +61,7 @@
       "send": ["button[aria-label*='Send']", "button[type='submit']"],
       "newChat": ["button[aria-label*='New']", "a[href='/']"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-message-author-role='user']", "[data-role='user']"],
-      "assistantMessage": ["[data-message-author-role='assistant']", "[data-role='assistant']"]
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
     }
   }
 ]
