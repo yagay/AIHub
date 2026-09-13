@@ -20,6 +20,9 @@
     <string name="attach">Attach</string>
     <string name="composer_hint">Ask anything…</string>
     <string name="send">Send</string>
+    <string name="share_confirm_title">Send to AIHub?</string>
+    <string name="share_confirm_message">The shared text/files will be sent using your currently selected AI account.</string>
+    <string name="external_request_denied">External AIHub request rejected.</string>
     <string name="browser_back">Back</string>
     <string name="browser_forward">Forward</string>
     <string name="browser_reload">Reload</string>
