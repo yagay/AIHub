@@ -1,110 +1,129 @@
 # AIHub
 
-AIHub is a lightweight Android app for using multiple AI websites through one AI-first interface. The current `main` branch uses **Android System WebView + AndroidX WebKit**, so GitHub Actions builds only the AIHub app instead of compiling Chromium itself.
+AIHub is a lightweight Android client that uses the official AI websites through **Android System WebView**, while presenting a small shared native Android interface.
 
-Built-in sites: **ChatGPT, Claude, Gemini, Grok and DeepSeek**. Custom AI websites can be added from the `＋ AI` button.
+It does **not** bundle or compile Chromium. The device WebView runtime provides the browser engine.
 
-## Why System WebView
+Built-in providers:
 
-Android System WebView provides the Chromium-based web runtime on the device and is updated independently from AIHub. AIHub therefore stays small and fast to build while still using real AI websites and their normal web sessions.
+- ChatGPT
+- Claude
+- Gemini
+- Grok
+- DeepSeek
 
-The previous full-Chromium overlay implementation is preserved on:
+## Design goals
 
-```text
-archive/chromium-overlay
-```
+1. One shared implementation, not one app implementation per AI.
+2. Provider-specific website details stay behind a small adapter boundary.
+3. Provider/account sessions are retained when switching.
+4. Multi-account login data is isolated with AndroidX WebKit profiles when supported by the installed WebView runtime.
+5. Native UI never knows CSS selectors, cookies or WebView details.
+6. Adding or repairing one provider should not require changing the app UI or session engine.
 
 ## Architecture
 
 ```text
-aihub-core/
-Pure Java provider/session/command model
-        ↓
-aihub-android/
-AI-first UI + generic DOM engine + provider rules
-        ↓
-AiHubBrowserHost
-        ↓
-app/WebViewBrowserHost
-        ↓
-Android System WebView
+MainActivity
+    ↓
+MainController
+    ├── MainScreen                 native Android UI only
+    ├── ProviderRegistry
+    │      └── AiProviderAdapter
+    │             └── GenericWebProviderAdapter
+    │                    └── ProviderSpec
+    ├── AccountRepository
+    ├── AppPreferences
+    └── WebSessionManager
+           ├── SessionKey(provider + account)
+           ├── WebViewFactory
+           └── DomBridge
 ```
 
-`aihub-core` has no Android dependency. `aihub-android` has no concrete WebView or Chromium-internal dependency. All System WebView behavior is isolated in `app/src/main/java/com/yagay/aihub/app/WebViewBrowserHost.java`.
+### Stable boundaries
 
-## AI-first UI
+`ui/`
+: Native app controls. No website-specific code.
 
-The app provides:
+`provider/`
+: Uniform AI-provider interface. Most providers reuse `GenericWebProviderAdapter`.
 
-- back / forward / reload
-- horizontal AI switcher
-- retained page per AI, so switching does not reload the previous page
-- one shared composer/send action
-- new chat and stop-generation actions
-- native website file chooser
-- custom AI websites
-- remembered last selected AI
+`model/`
+: Small immutable data models such as `ProviderSpec` and `AccountProfile`.
 
-## Browser capabilities
+`session/`
+: Retains and switches WebViews for each provider/account pair.
 
-`WebViewBrowserHost` currently handles:
+`web/`
+: All WebView configuration and generic DOM JavaScript live here.
 
-- JavaScript and DOM storage
-- shared website cookies and third-party cookies
-- file chooser / upload
-- downloads through Android `DownloadManager`
-- camera and microphone website permission requests
-- geolocation permission requests
-- popup/new-window WebViews
-- external URL schemes
-- renderer-process crash recovery
-- Safe Browsing
-- mixed-content blocking
-- direct `file://` access disabled
+`data/`
+: App metadata only. Passwords and website credentials are never stored by AIHub.
 
-Website DOM actions remain generic and configuration-driven rather than containing `if (provider == ChatGPT)` style branches.
+## Updating an AI website
 
-## Provider rules
-
-Built-in provider JSON lives in:
+The normal maintenance path is intentionally small:
 
 ```text
-aihub-android/src/main/assets/aihub/providers/
+ProviderRegistry.java
+        ↓
+change URL/selectors for one provider
+        ↓
+no UI/session/account changes required
 ```
 
-`index.txt` lists the packaged rules. Runtime priority is:
+If a provider eventually needs behavior that cannot be represented by generic selectors, create a provider-specific implementation of `AiProviderAdapter`. The rest of the application stays unchanged.
+
+## APP mode vs WEB mode
+
+AIHub keeps the official website as the service/session layer.
+
+**APP mode** hides common website chrome and the website composer after a usable chat input is detected. AIHub's native controls send commands through the provider adapter.
+
+**WEB mode** shows the normal website, useful for login, verification, settings or features not yet exposed by AIHub's native UI.
+
+Hidden website elements are not removed from the DOM, so the shared command engine can continue to operate the real website controls.
+
+## Multi-account model
+
+Each account is represented by a stable profile id:
 
 ```text
-packaged JSON
-→ user-added custom providers
-→ verified signed rule overrides
+ChatGPT / Personal → aihub_chatgpt_<id>
+ChatGPT / Work     → aihub_chatgpt_<id>
+Claude / Personal → aihub_claude_<id>
 ```
 
-Remote signed rules are disabled until a real Ed25519 public key is placed in:
+When `WebViewFeature.MULTI_PROFILE` is supported, `WebViewCompat.setProfile()` assigns each retained WebView its own browsing profile. Cookies, storage and login sessions therefore stay isolated between accounts.
+
+AIHub stores only account labels and profile identifiers in SharedPreferences. Website credentials remain owned by WebView.
+
+## Project structure
+
+The rebuilt project intentionally has only one Gradle Android module:
 
 ```text
-aihub-android/src/main/assets/aihub/rules_public_key.txt
+AIHub/
+├── app/
+├── build.gradle.kts
+├── settings.gradle.kts
+└── .github/workflows/core.yml
 ```
 
-## Android support
+No old `aihub-core` / `aihub-android` module is required by the new architecture.
 
-Current configuration:
+## Build
+
+Requirements:
 
 ```text
-minSdk      31  (Android 12)
-compileSdk  36
- targetSdk  36
-Java        17
-AGP         9.4.0
-Gradle      9.6.0
-AndroidX WebKit 1.17.0
+Java 17
+Android SDK 36
+Gradle 9.6
+AGP 9.4.0
 ```
 
-The app can run on newer Android versions as well; compile/target SDK can be moved to API 37 when the stable SDK package is available to the build environment.
-
-## Build locally
-
-With Android SDK 36 and Java 17 installed:
+Build:
 
 ```bash
 gradle :app:assembleDebug
@@ -116,33 +135,4 @@ APK:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## GitHub Actions
-
-Every push to `main` builds on ordinary `ubuntu-latest`; no self-hosted Chromium build machine is required.
-
-Workflow:
-
-```text
-.github/workflows/core.yml
-```
-
-Successful runs upload an artifact named similar to:
-
-```text
-AIHub-debug-214
-```
-
-containing `app-debug.apk`.
-
-## Repository checks
-
-```bash
-python3 scripts/validate_provider_rules.py
-python3 scripts/validate_repo.py
-bash scripts/run_core_smoke_test.sh
-gradle :app:assembleDebug
-```
-
-## Compatibility note
-
-System WebView is intentionally much simpler than maintaining a Chromium fork, but it is not identical to full Chrome. Some identity providers—especially Google sign-in flows—may restrict authentication inside embedded WebViews. ChatGPT/Claude/Gemini/Grok/DeepSeek login and upload behavior therefore still need physical-device testing; AIHub does not spoof Chrome or bypass a provider's login policy.
+GitHub Actions builds and lints every push to `main` and uploads the debug APK artifact.
