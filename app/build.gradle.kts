@@ -10,8 +10,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 28
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -28,5 +28,5 @@ android {
 
 dependencies {
     implementation("androidx.activity:activity:1.13.0")
-    implementation("androidx.webkit:webkit:1.17.0")
+    implementation("org.mozilla.geckoview:geckoview-nightly:158.0.20260911092915")
 }
