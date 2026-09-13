@@ -1,111 +1,106 @@
 # Roadmap
 
-## Phase 1 — provider-only stable core ✅
+## Phase 1 — unified provider core ✅
 
-- [x] unified provider model
-- [x] one retained session per provider
-- [x] single `SessionManager` switching path
-- [x] `AiCommandBus` shared by UI and external callers
+- [x] one provider model
+- [x] one retained session abstraction per provider
+- [x] shared `SessionManager`
+- [x] shared `AiCommandBus`
+- [x] provider-specific names absent from stable controller logic
+- [x] account/workspace abstractions removed
+- [x] pure Java core with no Android/Chromium dependencies
+
+## Phase 2 — stable AI Android layer ✅ source-complete
+
+- [x] `AiHubBrowserHost` browser boundary
+- [x] Chrome-independent `BrowserSessionRuntime`
 - [x] generic DOM action engine
-- [x] browser runtime boundary
-- [x] provider-only external API/AIDL
-- [x] multi-account/workspace abstractions removed
-- [x] provider-specific names kept out of stable core
-
-## Phase 2 — AI-first Android shell ✅ repository source complete
-
-- [x] horizontal AI quick-switch rail
-- [x] current AI title
-- [x] retained browser session/profile per AI
+- [x] horizontal AI quick-switch UI
 - [x] shared composer
-- [x] new chat / stop / back / forward / reload
-- [x] Android system file picker
-- [x] multi-file attachment bridge
-- [x] attach-and-send ordering
-- [x] custom AI website entry
-- [x] diagnostics/tools menu
-- [ ] verify full GN/Ninja build against the selected live Chromium checkout
-- [ ] verify login/session restoration on a physical Android device
+- [x] new chat / stop / attach / browser navigation
+- [x] Chrome-controls escape hatch
+- [x] custom AI website dialog + persistence
+- [x] provider JSON codec/loader
+- [x] signed rule bundle verification/rollback
+- [x] normal attachment path delegates to website/Chrome native file chooser
+- [x] Android preselected-URI fallback bridge
 
-## Phase 3 — Chromium-independent architecture ✅ repository complete
+## Phase 3 — current Chromium Chrome overlay ✅ repository-side implementation complete
 
-- [x] `aihub-core` has no Android/Chromium dependency
-- [x] direct `org.chromium.webengine.*` imports restricted to `AiWebEngineHost.java`
-- [x] `WebEngineSessionRuntime` contains no upstream Chromium types
-- [x] repository validator rejects Chromium API leakage into other files
-- [x] deterministic provider profile/persistence IDs
-- [x] active `TabManager` resolved at operation time instead of caching the first Tab forever
-- [x] attachment transaction pins one active tab for the duration of one upload
-- [x] Chromium compatibility checker matches the exact Host API surface
-- [ ] execute the checker/build against the chosen real Chromium revision
-- [ ] adapt `AiWebEngineHost.java` only if that revision changed Java APIs
-- [ ] adapt `BUILD.gn` only if upstream target/dependency names moved
+- [x] obsolete standalone browser APK removed
+- [x] obsolete browser-embedding runtime removed
+- [x] exactly two Chromium-specific Java seam files
+- [x] real normal Chrome tabs used for providers
+- [x] current tab resolved at operation time
+- [x] isolated-world DOM execution through current main frame
+- [x] one `ChromeTabbedActivity` attach hook
+- [x] AIHub sources injected into `chrome_java_sources.gni`
+- [x] provider JSON/public key generated into Java during overlay
+- [x] compatibility checker watches the actual upstream surface
+- [x] build target changed to `chrome_public_apk`
+- [x] install/launch uses Chromium's generated runner
+- [ ] compile against a real current Chromium checkout
+- [ ] complete physical-device integration checklist
 
-## Phase 4 — provider maintenance ✅ repository complete
+## Phase 4 — provider maintenance ✅ mechanism complete
 
-- [x] JSON provider rule loader
-- [x] deterministic provider ordering
-- [x] generic semantic element resolution with selector fallback
-- [x] provider health probe
-- [x] diagnostics JSON export
-- [x] Ed25519-signed rule bundle verification
-- [x] monotonically increasing rule versions
-- [x] previous-bundle rollback
-- [x] rule-signing helper script and CI round-trip verification
-- [ ] choose and package the production rule-signing public key before remote distribution
-- [ ] optional production HTTPS distribution endpoint for signed bundles
+- [x] ChatGPT / Claude / Gemini / Grok / DeepSeek JSON rules
+- [x] semantic input/send/new-chat/stop resolution
+- [x] selector fallback
+- [x] custom provider metadata
+- [x] Ed25519 signed rule envelopes
+- [x] monotonic version enforcement
+- [x] rollback support
+- [x] build-time public-key embedding
+- [ ] choose/package a production Ed25519 public key when remote distribution is enabled
+- [ ] optionally add a trusted HTTPS distribution endpoint for signed bundles
 
-## Phase 5 — external integrations ✅ provider-only base API complete
+## Phase 5 — preserve Chromium browser capability 🔎 device verification pending
 
-- [x] token-gated unattended Android Intents
-- [x] tokenless deep links with explicit user confirmation
-- [x] provider-only AIDL/Binder service
-- [x] current provider/session query API
-- [x] Android share-sheet entry
-- [x] explicit confirmation for shares and deep links
-- [x] guarded exported EntryActivity + unexported ShellActivity
-- [x] repeated `singleTop` intents revalidated through `onNewIntent`
-- [ ] optional per-caller package/signature permission UI in addition to the client token
-- [ ] optional Android shortcuts/widgets
-- [ ] optional external event callbacks/subscriptions
+The architecture intentionally inherits these from the full browser rather than implementing copies:
 
-## Phase 6 — Chromium browser capability preservation ✅ repository policy prepared; device verification pending
+- [ ] verify OAuth/login flows on built-in providers
+- [ ] verify downloads
+- [ ] verify native file chooser
+- [ ] verify camera/microphone permission flow
+- [ ] verify password/autofill UI
+- [ ] verify popup/new-window behavior
+- [ ] verify media playback
+- [ ] verify process/tab restoration
+- [ ] verify multi-window activity path
 
-AIHub does not rebuild Chromium browser subsystems. Repository-side preparation now includes:
+A failure here is an integration regression to diagnose, not an automatic reason to build an AIHub replacement subsystem.
 
-- [x] camera capability declared in host manifest
-- [x] microphone/WebRTC capability declared in host manifest
-- [x] coarse/fine location capability declared in host manifest
-- [x] Android notification capability declared in host manifest
-- [x] active-tab-safe OAuth/popup architecture
-- [x] browser capability ownership matrix documented
-- [x] real-device integration checklist updated
-- [x] WebEngine API compatibility check runs before build
+## Phase 6 — polish after first successful full build
 
-The following are selected-revision/device verification tasks, not missing provider implementations:
+Only after the selected Chromium revision builds/runs:
 
-- [ ] verify Chromium/WebEngine permission prompts on-device
-- [ ] verify camera/microphone/location on supported AI websites
-- [ ] verify downloads before claiming download support
-- [ ] verify autofill/password-manager and safe-browsing behavior
-- [ ] verify popup/new-window/native-intent login paths
-- [ ] verify renderer crash/session recovery
-- [ ] verify memory-pressure behavior with several retained provider sessions
-- [ ] wire a custom loading/progress indicator only if the selected revision's verified observer API is needed by the AI-first UI
+- [ ] tune overlay insets so page content is never obscured by AIHub bars
+- [ ] add optional loading/progress indicator from `Tab.getProgress()`
+- [ ] improve selected-provider visual state
+- [ ] add provider management/edit/remove UI for custom providers
+- [ ] add diagnostics export for current provider/tab/rule resolution
+- [ ] add optional AIHub enable/disable setting
+- [ ] evaluate tablet/foldable/multi-window layout
 
-If any item requires embedder code, implement it once in `AiWebEngineHost.java`, never per provider.
+## Phase 7 — optional external automation
 
-## Phase 7 — advanced AI workflows (optional after base integration is proven)
+The old standalone Binder/Activity API was intentionally removed with the standalone APK. If automation is reintroduced, it must target the embedded coordinator rather than create a second browser runtime.
 
-- [ ] resend the same prompt to another AI
+Potential future surfaces:
+
+- [ ] Android shortcuts
+- [ ] share-sheet routing into current/provider AI
+- [ ] MacroDroid/ShortX-friendly explicit Intent receiver attached to the Chrome app
+- [ ] callback/event surface that never exposes cookies/auth/browser storage
+
+## Phase 8 — advanced AI workflows
+
+After browser integration is proven stable:
+
+- [ ] resend prompt to another AI
 - [ ] multi-provider fan-out
 - [ ] compare answers
-- [ ] unified answer extraction
-- [ ] export/search normalized conversation history
-- [ ] optional voice/share/shortcut surfaces using the same `AiCommandBus`
-
-## Definition of repository-side completion
-
-Repository-side work is complete when CI is green for the provider-only core, security/wiring invariants, rule tooling, one-file Chromium API seam, build/install scripts and documentation.
-
-A real Chromium `autoninja` build and device behavior cannot be honestly marked complete without an actual compatible Chromium Android checkout and target device. Those final integration results must be recorded using `INTEGRATION_TEST_CHECKLIST.md`.
+- [ ] generic answer extraction
+- [ ] normalized conversation export/search
+- [ ] optional voice and screenshot-to-AI workflows using the same provider/session core
