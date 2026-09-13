@@ -28,14 +28,14 @@ public final class MainActivity extends ComponentActivity {
         broker = new LocalBroker(titanium::launchProvider);
         broker.start();
 
-        ui.showStatus("AIHub UI 正在加载…\n正在申请 Root 并准备 Titanium 扩展…", false);
+        ui.showStatus("AIHub UI 正在加载…\n正在准备 Titanium Companion 扩展…", false);
         titanium.prepareAsync(new TitaniumManager.Callback() {
             @Override
             public void onReady() {
                 runOnUiThread(() -> {
-                    ui.showTransientStatus("Root 已授权 · Titanium 扩展已准备");
+                    ui.showTransientStatus("Titanium Companion 已准备");
                     Toast.makeText(MainActivity.this,
-                            "Root/Titanium ready", Toast.LENGTH_SHORT).show();
+                            "Titanium Companion ready", Toast.LENGTH_SHORT).show();
                 });
             }
 
@@ -45,12 +45,13 @@ public final class MainActivity extends ComponentActivity {
                     String message = error == null || error.getMessage() == null
                             ? String.valueOf(error)
                             : error.getMessage();
-                    ui.showDismissibleWarning("Root / Titanium 自动安装失败\n\n" + message
-                            + "\n\nAIHub UI 仍可使用。请确认 KernelSU/Root 已授权 AIHub、已安装 Titanium Browser；"
+                    ui.showDismissibleWarning("Titanium Companion 自动配置失败\n\n" + message
+                            + "\n\n这不代表 Titanium Browser 没有安装。AIHub UI 仍可使用。"
+                            + "如果你已手动安装 Companion 扩展，可以忽略自动配置；"
                             + "也可以在 Titanium 的 chrome://extensions 中手动 Load unpacked。\n"
-                            + "下一次启动 AIHub 会再次尝试自动安装。");
+                            + "下一次启动 AIHub 会再次尝试自动配置。");
                     Toast.makeText(MainActivity.this,
-                            "Root/Titanium failed: " + message, Toast.LENGTH_LONG).show();
+                            "Titanium Companion setup failed: " + message, Toast.LENGTH_LONG).show();
                 });
             }
         });
