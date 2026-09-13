@@ -28,14 +28,14 @@ public final class SignedProviderRuleBundle {
     }
 
     public boolean isConfigured() {
-        return !AiHubEmbeddedRules.rulesPublicKey().isBlank();
+        return !AiHubEmbeddedRules.rulesPublicKey(stateStore.context()).isBlank();
     }
 
     public Verified verify(String envelopeJson) throws Exception {
         if (envelopeJson == null || envelopeJson.isBlank()) {
             throw new IllegalArgumentException("Rule bundle is empty");
         }
-        String keyText = AiHubEmbeddedRules.rulesPublicKey();
+        String keyText = AiHubEmbeddedRules.rulesPublicKey(stateStore.context());
         if (keyText.isBlank()) {
             throw new IllegalStateException(
                     "Remote provider rules are disabled: no Ed25519 public key configured");
