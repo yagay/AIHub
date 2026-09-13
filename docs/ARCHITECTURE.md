@@ -2,117 +2,131 @@
 
 ## Hard rules
 
-1. A feature is implemented once in the common core.
-2. UI never branches on a provider name.
-3. Provider differences are configuration first; provider patches are a last resort.
-4. Provider switching, account switching and workspace switching all end at `SessionManager`.
+1. AIHub manages providers, not accounts.
+2. Each provider owns one retained browser session/profile.
+3. UI never branches on a provider name.
+4. Provider differences are configuration first; provider patches are a last resort.
 5. Browser/Chromium code stays behind `SessionRuntime`.
-6. External callers use `AiCommandBus`; they never receive cookies, login tokens or raw DOM/JavaScript access.
-7. A third-party API cannot expose browser profile data.
-8. The real WebEngine shell is never exported; external requests pass through the guarded entry layer.
+6. Direct `org.chromium.webengine.*` imports are allowed only in `WebEngineSessionRuntime` and `AiWebEngineHost`.
+7. External callers use `AiCommandBus`; they never receive cookies, login tokens or raw DOM/JavaScript access.
+8. The real shell is never exported; external requests pass through the guarded entry Activity.
 
 ## Layers
 
 ```text
-UI ---------------------------------------┐
-Share / confirmed Deep Link ------------>│
-Token-gated Intent / Binder ------------>│
-                                         ↓
-                                AiHubEntryActivity
-                             (external validation only)
-                                         ↓
-                                   AiCommandBus
-                                         ↓
-                                  SessionManager
-                                         ↓
-                                   SessionRuntime
-                                         ↓
-                              WebEngineSessionRuntime
-                                         ↓
-                               Chromium WebEngine Tab
-                                         ↓
-                               Generic DOM action engine
-                                         ↓
-                                     AI website
+AI-first UI -------------------------------┐
+Share / confirmed Deep Link -------------->│
+Token-gated Intent / Binder -------------->│
+                                          ↓
+                                 AiHubEntryActivity
+                              (external validation only)
+                                          ↓
+                                    AiCommandBus
+                                          ↓
+                                   SessionManager
+                                          ↓
+                                    SessionRuntime
+                                          ↓
+                               WebEngineSessionRuntime
+                                          ↓
+                                  AiWebEngineHost
+                                          ↓
+                                  Chromium WebEngine
+                                          ↓
+                               Generic DOM rule engine
+                                          ↓
+                                      AI website
 ```
 
-In-app UI actions may call the shared core directly. External Android entry points are guarded before they can reach the unexported WebEngine shell.
+## Stable core
 
-## Main objects
+The core is deliberately small:
 
-- `ProviderConfig`: website and capabilities; contains only fallback selectors.
-- `AiAccount`: provider login identity and isolated Chromium profile name.
-- `AiWorkspace`: maps each provider to a preferred account.
-- `AiSessionKey`: `providerId + accountId`.
-- `AiSession`: retained conversation/tab state.
-- `SessionManager`: switching/account/workspace authority.
-- `AiCommandBus`: one command entrance for UI and third-party commands.
+- `ProviderConfig`: website, capabilities and selector fallbacks.
+- `AiSessionKey`: only `providerId`.
+- `AiSession`: retained provider session metadata.
+- `SessionManager`: one session per provider and all provider switching.
+- `AiCommandBus`: common command entrance for UI and external callers.
 - `SessionRuntime`: browser implementation boundary.
-- `AiHubEntryActivity`: the only exported Activity; validates/authorizes external requests.
-- `AiHubShellActivity`: unexported unified browser UI.
 
-## Multi-account strategy
+There is no account registry, account model, workspace model or workspace routing layer.
 
-Do not rely on Chrome for Android's normal ProfileManager. AIHub binds every logical account to a separate WebEngine `profileName` and persistence ID.
+## Chromium seam
+
+The Chromium-facing surface is intentionally concentrated in two files:
+
+```text
+WebEngineSessionRuntime.java
+AiWebEngineHost.java
+```
+
+`WebEngineSessionRuntime` translates stable AIHub operations into browser operations. `AiWebEngineHost` owns the exact upstream WebEngine classes, fragments, tabs and Android file bridge.
+
+A Chromium update should therefore follow this rule:
+
+```text
+WebEngine API changed
+→ adapt AiWebEngineHost / WebEngineSessionRuntime
+→ keep SessionManager, AiCommandBus, provider rules and AI UI unchanged
+```
+
+## Provider session strategy
+
+Each provider gets one deterministic profile and persistence ID:
+
+```text
+profileName   = aihub_provider_<providerId>
+persistenceId = aihub_session_<providerId>
+```
 
 Examples:
 
 ```text
-ChatGPT / personal -> profileName = personal_gpt
-ChatGPT / work     -> profileName = work_gpt
-Claude / personal  -> profileName = personal_claude
+ChatGPT  -> aihub_provider_chatgpt
+Claude   -> aihub_provider_claude
+Gemini   -> aihub_provider_gemini
 ```
 
-A workspace maps multiple providers to preferred accounts:
+The user logs in directly on each real AI website. Cookies, local storage, IndexedDB and website auth state remain owned by Chromium/WebEngine.
+
+## AI-first switching
+
+The main UI always exposes a horizontal provider rail. Switching provider calls only:
 
 ```text
-Personal workspace
-  ChatGPT -> gpt_personal
-  Claude  -> claude_personal
-  Gemini  -> gemini_personal
+SessionManager.switchProvider(providerId)
 ```
 
-When an account disappears or a stored workspace mapping is stale/wrong-provider, `SessionManager` falls back to a valid account rather than leaving an invalid session key.
+If that provider has already been opened, its retained browser surface is reactivated rather than intentionally rebuilding the page.
 
-## Switching
+## Unified browser and AI actions
 
-All switching paths share the same manager:
+AIHub keeps browser controls and AI controls together:
 
-```text
-provider picker   -> switchProvider()
-account picker    -> switchAccount()
-workspace switch  -> switchWorkspace()
-previous/next AI  -> previousProvider()/nextProvider()
-external command  -> AiCommandBus.execute()
-```
+- back / forward / reload
+- provider quick switch
+- new chat
+- attachment picker
+- stop generation
+- shared composer/send
 
-The runtime retains session Tabs where practical. Switching activates an existing session rather than intentionally reloading the provider home page.
+The generic DOM engine uses semantic discovery first and provider JSON selectors as fallback. Provider-specific patches must never contain session or UI logic.
 
-## Unified composer and actions
+## Chromium capability policy
 
-The generic DOM engine tries semantic discovery before provider selectors:
+AIHub should preserve browser capability through the Chromium seam instead of reimplementing it per AI. Downloads, permissions, camera/microphone, file chooser behavior, renderer recovery and other browser features belong in the adapter layer.
 
-1. visible textarea
-2. `[role=textbox]`
-3. `[contenteditable=true]`
-4. geometry/position scoring
-5. semantic action button (`aria-label`, title, visible text)
-6. configured selector fallback
-7. provider-specific patch only if all common strategies fail
-
-Attachments use the Android document picker and a common WebEngine bridge. `ATTACH_AND_SEND` waits for successful attachment injection before sending prompt text.
-
-Keep provider patches small. A provider patch must never contain account/session/UI logic.
+The shell/UI may be completely AI-specific while the underlying website runtime remains Chromium.
 
 ## Third-party API security
 
-- **AIDL/Binder**: unattended operations require the local AIHub client token. A future per-caller package/signature permission layer may be added, but is not claimed as implemented today.
-- **Explicit custom Intents**: intended for Tasker/MacroDroid/ShortX and require the client token in Intent extras for unattended execution.
-- **Android Shares**: `ACTION_SEND` / `ACTION_SEND_MULTIPLE` are converted to common commands, but require explicit user confirmation.
-- **Deep links**: intentionally contain no reusable client token and require explicit user confirmation before execution.
+- **AIDL/Binder**: unattended operations require the local AIHub client token.
+- **Explicit Intents**: provider-only targeting; unattended execution requires the token in Intent extras.
+- **Android Shares**: require explicit user confirmation.
+- **Deep links**: tokenless and require explicit user confirmation.
 
-The client token must never be placed in a URL. Never expose cookies, localStorage, IndexedDB, website auth tokens or raw JavaScript execution to third parties.
+Never expose cookies, localStorage, IndexedDB, website auth tokens or raw JavaScript execution to third parties.
 
 ## Provider maintenance
 
-Built-in, custom and signed-update providers use the same `ProviderConfig`/JSON rule model. A signed update may override a built-in provider by ID, but only after Ed25519 verification. The previous signed bundle is retained for rollback. If no production public key is configured, signed-rule installation stays disabled.
+Built-in, custom and signed-update providers use the same `ProviderConfig`/JSON rule model. A signed update may override a built-in provider by ID only after Ed25519 verification. The previous signed bundle is retained for rollback.
