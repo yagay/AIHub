@@ -24,14 +24,21 @@ AI-first UI / Share / Intent / Binder / Deep Link
                  Chromium WebEngine
 ```
 
-The stable core has no Chromium dependency. Direct `org.chromium.webengine.*` usage is restricted to two integration files:
+The stable core has no Chromium dependency. Direct `org.chromium.webengine.*` usage is restricted to exactly one Java integration point:
 
 ```text
-chromium-overlay/.../WebEngineSessionRuntime.java
 chromium-overlay/.../AiWebEngineHost.java
 ```
 
-When Chromium changes, adapt those integration points instead of rewriting AIHub's provider/session/UI logic.
+`WebEngineSessionRuntime` is deliberately Chromium-type-free. For a normal Chromium revision update, the expected maintenance surface is:
+
+```text
+AiWebEngineHost.java          upstream Java API adaptation
+chromium-overlay/BUILD.gn    only if upstream GN target names/deps move
+check_chromium_checkout.py   compatibility signature update
+```
+
+Provider/session/UI logic should not change just because Chromium changes an embedding API.
 
 ## AI-first UI
 
@@ -54,13 +61,17 @@ Switching AI activates its existing Chromium surface instead of rebuilding or re
 
 AIHub does not fork provider websites or replace their login systems. Website rendering, cookies, local storage, IndexedDB, navigation and browser state remain owned by Chromium/WebEngine.
 
-The long-term rule is: keep browser capabilities in the Chromium integration layer and replace only the shell/UI. Features such as downloads, permissions, camera/microphone, file handling and crash/session restoration should be implemented through the Chromium adapter boundary rather than duplicated in provider-specific code.
+AIHub resolves Chromium's **current active tab at operation time** instead of pinning all actions to the first tab opened for a provider. This lets OAuth/login/new-window flows change the active Chromium tab without leaving AIHub's composer/navigation controls attached to a stale page.
+
+The long-term rule is: keep browser capabilities in Chromium/WebEngine and replace only the shell/UI. Do not create provider-specific implementations of downloads, permissions, camera/microphone, login popups, autofill, safe-browsing behavior, or crash/session restoration when the selected WebEngine revision already owns those capabilities.
+
+See `docs/BROWSER_CAPABILITIES.md` for the integration policy and real-device verification matrix.
 
 ## Repository layout
 
 ```text
 aihub-core/          provider/session/command core; no Android or Chromium dependency
-chromium-overlay/    Android AI UI + the small Chromium integration seam
+chromium-overlay/    Android AI UI + one direct Chromium Java adaptation file
 android-api/         provider-only third-party API/AIDL
 docs/                architecture, Chromium integration and roadmap
 scripts/             validation, Chromium sync/build/install and rule signing
@@ -79,7 +90,8 @@ bash scripts/run_core_smoke_test.sh
 CI also enforces these architecture rules:
 
 - no account/workspace model may re-enter active source
-- direct WebEngine imports may exist only in the two Chromium adapter files
+- direct WebEngine imports may exist only in `AiWebEngineHost.java`
+- the host must resolve the current active tab instead of permanently caching the first tab
 - `AiHubShellActivity` remains unexported
 - deep links never carry the reusable client token
 
@@ -142,4 +154,4 @@ python3 scripts/build_signed_rule_bundle.py \
 
 ## Verification boundary
 
-The provider-only core, rule tooling, repository wiring and architecture invariants are verified by CI. A complete Chromium `autoninja` build and real-device browser test still requires a compatible Chromium Android checkout and device.
+The provider-only core, rule tooling, repository wiring and architecture invariants are verified by CI. A complete Chromium `autoninja` build and real-device browser test still requires a compatible Chromium Android checkout and device. Browser capabilities that depend on the selected upstream WebEngine revision are intentionally marked as integration-verification items rather than being reimplemented speculatively in AIHub.
