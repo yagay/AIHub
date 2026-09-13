@@ -27,6 +27,9 @@
     <string name="workspace_default_name">Workspace</string>
     <string name="tools">Tools</string>
     <string name="provider_diagnostics">Provider diagnostics</string>
+    <string name="export_diagnostics">Export diagnostics JSON</string>
+    <string name="diagnostics_saved">Diagnostics saved</string>
+    <string name="diagnostics_export_failed">Could not save diagnostics</string>
     <string name="integration_token">Third-party client token</string>
     <string name="rotate_token">Rotate third-party token</string>
     <string name="rotate_token_warning">Existing third-party integrations will stop working until they use the new token.</string>
