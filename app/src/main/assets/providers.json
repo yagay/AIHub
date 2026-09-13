@@ -10,6 +10,15 @@
       "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
       "stop": ["button[data-testid='stop-button']", "button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
+    },
+    "ui": {
+      "hide": ["header", "[role='banner']"],
+      "actions": [
+        {"id":"history","label":"History","selectors":["button[data-testid='open-sidebar-button']","button[aria-label*='sidebar']","button[aria-label*='History']"],"keywords":["sidebar","history"]},
+        {"id":"model","label":"Model","selectors":["button[data-testid='model-switcher-dropdown-button']","button[aria-label*='model']"],"keywords":["model","gpt"]},
+        {"id":"account","label":"Account","selectors":["button[data-testid='profile-button']","button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
+        {"id":"more","label":"More","selectors":["button[aria-label='More']","button[aria-label*='More']"],"keywords":["more"]}
+      ]
     }
   },
   {
@@ -23,6 +32,15 @@
       "newChat": ["a[href='/new']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
+    },
+    "ui": {
+      "hide": ["header", "[role='banner']"],
+      "actions": [
+        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
+        {"id":"model","label":"Model","selectors":["button[data-testid*='model']","button[aria-label*='model']"],"keywords":["model","claude"]},
+        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
+        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
+      ]
     }
   },
   {
@@ -36,6 +54,15 @@
       "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"]
+    },
+    "ui": {
+      "hide": ["header", "[role='banner']"],
+      "actions": [
+        {"id":"history","label":"History","selectors":["button[aria-label*='Main menu']","button[aria-label*='menu']"],"keywords":["menu","history","sidebar"]},
+        {"id":"model","label":"Model","selectors":["button[aria-label*='model']","button[data-test-id*='model']"],"keywords":["model","gemini"]},
+        {"id":"account","label":"Account","selectors":["button[aria-label*='Google Account']","a[aria-label*='Google Account']"],"keywords":["google account","account"]},
+        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
+      ]
     }
   },
   {
@@ -49,6 +76,15 @@
       "newChat": ["[data-testid='new-chat']", "a[href='/']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["[data-testid='attach-button']", "input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
+    },
+    "ui": {
+      "hide": ["header", "[role='banner']"],
+      "actions": [
+        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
+        {"id":"model","label":"Mode","selectors":["button[aria-label*='model']","button[aria-label*='mode']"],"keywords":["model","mode"]},
+        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
+        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
+      ]
     }
   },
   {
@@ -62,6 +98,16 @@
       "newChat": ["button[aria-label*='New']", "a[href='/']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
+    },
+    "ui": {
+      "hide": ["header", "[role='banner']"],
+      "actions": [
+        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
+        {"id":"deepthink","label":"DeepThink","selectors":["button[aria-label*='DeepThink']"],"keywords":["deepthink","deep think"]},
+        {"id":"search","label":"Search","selectors":["button[aria-label*='Search']"],"keywords":["search"]},
+        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
+        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
+      ]
     }
   }
 ]
