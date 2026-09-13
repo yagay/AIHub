@@ -1,32 +1,52 @@
 # AIHub Shell MVP
 
-AIHub now has a unified Android/WebEngine shell source layer with provider switching, multiple isolated accounts, workspaces, shared composer actions, attachments, diagnostics and third-party integrations.
+AIHub now uses a provider-only shell: one retained Chromium/WebEngine session per AI provider, with no multi-account or workspace management layer.
 
-## Included
+## Main UI
 
-- one provider switcher for every AI site
-- previous/next AI switching through `SessionManager`
-- one account model shared by every provider
-- isolated WebEngine `profileName` per account
-- account rename/removal with safe workspace repair
-- workspace mappings across AI providers
-- persisted account/workspace/session metadata
-- shared composer, new-chat and stop actions
-- browser back/forward/reload
-- Android system file picker and multi-file uploads
-- ordered attach-then-send for shares with both files and prompt text
-- custom AI website registration
-- provider health diagnostics and JSON export
-- signed provider-rule import and rollback
-- Intent, deep-link, share and AIDL/Binder entry points through one `AiCommandBus`
+The shell is organized for fast AI switching rather than browser tab/account management:
+
+- horizontal AI quick-switch rail
+- current AI title
+- back / forward / reload
+- one-tap new chat
+- attachment picker
+- stop generation
+- one shared composer/send control
+- custom AI website add button
+- tools menu for diagnostics, rule updates and integration token
+
+Switching AI reactivates its retained WebEngine surface whenever possible.
+
+## Session behavior
+
+Each provider owns one deterministic browser container:
+
+```text
+profileName   = aihub_provider_<providerId>
+persistenceId = aihub_session_<providerId>
+```
+
+The user logs in on the real website. AIHub does not store website passwords or duplicate website session data into its own account model.
+
+## Chromium isolation boundary
+
+The shell and core do not import Chromium APIs directly. Direct WebEngine usage is limited to:
+
+```text
+WebEngineSessionRuntime.java
+AiWebEngineHost.java
+```
+
+When Chromium updates, adapt those two files instead of rewriting the AI UI or stable provider/session core.
 
 ## External-entry security
 
 `AiHubEntryActivity` is the only exported Activity. `AiHubShellActivity` is intentionally unexported.
 
-Ordinary Android shares require a user confirmation dialog before the content reaches the logged-in AI session. Deep links are also user-confirmed and intentionally contain no reusable client secret. Unattended custom Intent/Binder actions require the local client token shown in AIHub Tools.
+Ordinary Android shares and deep links require user confirmation. Unattended custom Intent/Binder actions require the local client token shown under AIHub Tools.
 
-Switch provider automatically with a token-gated Intent:
+Switch provider:
 
 ```bash
 adb shell am start \
@@ -36,12 +56,13 @@ adb shell am start \
   --es client_token YOUR_TOKEN
 ```
 
-Send text automatically:
+Send text to a selected provider:
 
 ```bash
 adb shell am start \
   -n com.yagay.aihub/com.yagay.aihub.chromium.AiHubEntryActivity \
   -a com.yagay.aihub.action.SEND_TEXT \
+  --es provider_id chatgpt \
   --es text "Explain this code" \
   --es client_token YOUR_TOKEN
 ```
@@ -51,14 +72,6 @@ User-confirmed deep link:
 ```text
 aihub://send?provider=gemini&text=hello
 ```
-
-The external API never returns WebEngine cookies, login tokens, localStorage or IndexedDB.
-
-## Multi-account behavior
-
-AIHub stores only account metadata in Android preferences. Website login state remains owned by the corresponding WebEngine profile. Creating another AIHub account therefore creates a separate browser profile name rather than logging the existing website profile out.
-
-Removing an account from AIHub removes its metadata/session/workspace mappings, but does not claim to erase the underlying WebEngine profile data until a supported upstream profile-data deletion API has been verified.
 
 ## Chromium development build
 
@@ -74,10 +87,4 @@ Then run:
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
-For multiple connected devices, pass the serial as the third argument or set `ANDROID_SERIAL`.
-
-The one-command flow validates the repository and provider rules, checks the selected Chromium WebEngine API surface, syncs AIHub to `src/aihub`, validates the GN target, builds AIHub plus local WebEngine support, installs the APKs and launches `AiHubEntryActivity`.
-
-## Remaining integration boundary
-
-Repository CI validates the stable core and wiring, but the actual WebEngine layer must still be compiled and exercised inside a real Chromium Android checkout. Any Chromium-revision-specific API changes should be fixed only under `chromium-overlay/`; `aihub-core/` should remain unchanged.
+Repository CI verifies the provider-only core and prevents account/workspace abstractions or Chromium imports from leaking back into stable source. The final WebEngine integration still needs a real Chromium Android checkout and physical-device test.
