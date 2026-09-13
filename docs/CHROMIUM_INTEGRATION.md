@@ -1,14 +1,14 @@
 # Chromium / WebEngine integration
 
-AIHub targets Chromium **WebEngine** rather than modifying the Android Chrome UI directly.
+AIHub targets Chromium **WebEngine** while replacing the normal browser shell with an AI-first UI.
 
-This keeps the stable AI/session/account core independent from Chromium API churn while still using Chromium's browser embedding layer for real website login state, navigation and rendering.
+The important design rule is that Chromium remains the website/runtime layer, while AIHub owns provider switching, the composer and AI-specific navigation UI.
 
 ## Upstream verification first
 
-Before blaming AIHub for an integration failure, verify that the selected Chromium revision can build and run its own WebEngine sample.
+Before debugging AIHub, verify that the selected Chromium revision can build and run its own WebEngine sample.
 
-A typical Android checkout setup is:
+Typical Android checkout setup:
 
 ```bash
 fetch --nohooks android
@@ -24,95 +24,121 @@ Use Android GN args, including:
 target_os = "android"
 ```
 
-Current Chromium WebEngine documentation uses the local sample flow:
+Then verify the upstream WebEngine sample available in that revision.
 
-```bash
-autoninja -C out/Default run_webengine_shell_local
-out/Default/bin/run_webengine_shell_local
-```
+## Two-file integration seam
 
-If the stock WebEngine sample does not build/run on the chosen revision/device, fix that upstream environment first.
-
-## AIHub compatibility seam
-
-Every direct `org.chromium.webengine.*` reference is kept under `chromium-overlay/`.
-
-The stable modules do not depend on WebEngine:
+Direct `org.chromium.webengine.*` imports are restricted to exactly two AIHub files:
 
 ```text
-aihub-core/
-android-api/
+chromium-overlay/java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java
+chromium-overlay/java/com/yagay/aihub/chromium/AiWebEngineHost.java
 ```
 
-When Chromium changes an API, adapt `chromium-overlay/` instead of adding Chromium-version branches to `aihub-core/`.
+Responsibilities:
 
-AIHub currently checks for the WebEngine surface it uses, including:
+```text
+WebEngineSessionRuntime
+- converts provider/session operations into browser operations
+- derives deterministic provider profile/persistence IDs
+- executes provider DOM actions
+- exposes current URL / probe helpers
 
-- `WebSandbox.create()` / fragment creation
+AiWebEngineHost
+- owns WebSandbox / WebFragment / Tab / TabManager usage
+- shows/hides provider browser surfaces
+- restores retained tabs
+- bridges Android files into the page
+```
+
+Everything else should remain independent of Chromium API details.
+
+## Upgrade rule
+
+When Chromium updates:
+
+```text
+1. run scripts/check_chromium_checkout.py
+2. verify the upstream WebEngine sample
+3. build AIHub
+4. if WebEngine API changed, edit only AiWebEngineHost/WebEngineSessionRuntime
+5. do not add Chromium-version branches to aihub-core
+```
+
+Repository validation rejects new direct WebEngine imports outside those two files.
+
+## Current WebEngine surface
+
+AIHub currently depends on a small public surface including:
+
+- `WebSandbox.create()` and fragment creation
 - `FragmentParams.setProfileName()`
 - `FragmentParams.setPersistenceId()`
 - `TabManager.getActiveTab()` / `createTab()`
 - `Tab.executeScript()`
 - `Tab.getNavigationController()`
 - active-tab and display-URI access
-- the local WebEngine/WebLayer support target
+- local WebEngine/WebLayer support target
 
-Run the compatibility check directly with:
+Run:
 
 ```bash
 python3 scripts/check_chromium_checkout.py /path/to/chromium/src
 ```
 
-## Build AIHub
+## Provider browser containers
 
-The supported repository-side flow is:
+AIHub uses one retained browser container per provider:
+
+```text
+profileName   = aihub_provider_<providerId>
+persistenceId = aihub_session_<providerId>
+```
+
+This is not a multi-account feature. It is only the browser-state container for that AI provider.
+
+## Browser capability policy
+
+The goal is to preserve Chromium website/browser capability while using a different UI. Browser features belong in the integration seam, not in provider-specific code.
+
+Examples to add/verify after the first real build:
+
+- downloads
+- permission prompts
+- camera/microphone
+- popup/new-window login flows
+- file chooser behavior
+- renderer crash recovery
+- loading/progress state
+
+## Build AIHub
 
 ```bash
 bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
 ```
 
-The script:
-
-1. validates AIHub provider rules and repository wiring;
-2. runs the stable-core smoke test;
-3. checks the selected Chromium WebEngine API surface;
-4. syncs the repository to `chromium/src/aihub`;
-5. verifies that the GN output is Android-targeted;
-6. resolves `//aihub/chromium-overlay:aihub_apk` with `gn desc`;
-7. builds `//aihub/chromium-overlay:aihub_local`.
-
-`aihub_local` builds both AIHub and the local WebEngine support APK used during Chromium development.
-
-## Build + install in one command
+Or build + install:
 
 ```bash
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
-With multiple Android devices connected:
+The scripts validate the repository, check the selected Chromium API surface, sync AIHub to `chromium/src/aihub`, resolve the GN target and build the local target.
 
-```bash
-bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
-```
-
-The install step discovers the generated APKs, installs them through `adb`, and launches the guarded exported `AiHubEntryActivity`. The real `AiHubShellActivity` intentionally remains unexported.
-
-## Integration debugging rule
-
-If a Chromium revision breaks AIHub, classify the failure before changing code:
+## Debugging classification
 
 ```text
-stock WebEngine sample fails
+upstream WebEngine sample fails
 → Chromium/device/environment problem
 
-stock sample works, check_chromium_checkout.py fails
-→ WebEngine API/target changed; adapt chromium-overlay
+upstream sample works, compatibility check fails
+→ adapt the two Chromium seam files / GN wiring
 
-compatibility check passes, GN target fails
-→ AIHub BUILD.gn/dependency wiring problem
+compatibility passes, GN target fails
+→ AIHub BUILD.gn/dependency issue
 
 build succeeds, runtime fails
-→ capture AIHub diagnostics + logcat and fix runtime integration
+→ capture AIHub diagnostics + logcat and fix the seam/runtime behavior
 ```
 
-Do not add provider-specific or Chromium-revision-specific branches to the stable session/account/command core to work around an embedding-layer failure.
+Provider rules, `SessionManager`, `AiCommandBus` and the AI-first UI should not change just because Chromium changed an embedding API.
