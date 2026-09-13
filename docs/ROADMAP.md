@@ -11,17 +11,19 @@
 - WebEngine runtime boundary
 - external API contract/AIDL skeleton
 
-## Phase 2 — first runnable Chromium shell
+## Phase 2 — first runnable Chromium shell (in progress)
 
-- AI Hub activity/shell layout
-- provider dropdown
-- account dropdown
-- workspace selector
-- retained tabs
-- WebEngine profile creation
-- login persistence
-- bottom unified composer
-- previous/next provider gestures
+- [x] AI Hub activity/shell layout
+- [x] provider picker
+- [x] account picker
+- [ ] workspace selector
+- [x] retained tabs via persistence id
+- [x] WebEngine profile creation
+- [x] login/profile persistence architecture
+- [x] bottom unified composer
+- [x] previous/next provider controls
+- [ ] navigation/loading UI polish
+- [ ] build verification against selected Chromium revision
 
 ## Phase 3 — browser completeness
 
@@ -44,11 +46,12 @@
 
 ## Phase 5 — external integrations
 
-- Binder caller identity + permission UI
-- Tasker/MacroDroid/ShortX intents
-- Android shares
-- shortcuts/widgets
-- event callbacks
+- [ ] Binder caller identity + permission UI
+- [x] token-gated Tasker/MacroDroid/ShortX-compatible intents
+- [x] Android text shares
+- [x] token-gated deep links
+- [ ] shortcuts/widgets
+- [ ] event callbacks
 
 ## Phase 6 — advanced AI workflows
 
