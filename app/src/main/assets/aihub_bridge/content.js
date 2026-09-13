@@ -2,6 +2,7 @@
   const NATIVE_APP = "aihub";
   const APP_CLASS = "aihub-native-app-mode";
   const STYLE_ID = "aihub-native-app-style";
+  const COMPOSER_MARK = "data-aihub-composer-shell";
   let port = null;
 
   const connect = () => {
@@ -24,33 +25,93 @@
     } catch (_) {}
   };
 
-  const selectors = (command, key) => {
-    const value = command && command.selectors && command.selectors[key];
-    return Array.isArray(value) ? value : [];
-  };
+  const array = value => Array.isArray(value) ? value.filter(Boolean) : [];
+  const selectors = (command, key) => array(command && command.selectors && command.selectors[key]);
 
   const visible = element => !!element && !element.disabled &&
       !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
 
-  const firstVisible = list => {
-    for (const selector of list) {
+  const firstExisting = list => {
+    for (const selector of array(list)) {
       try {
         const element = document.querySelector(selector);
-        if (visible(element)) return element;
+        if (element && !element.disabled) return element;
       } catch (_) {}
     }
     return null;
   };
 
-  const semanticButton = words => {
-    const lowered = words.map(word => String(word).toLowerCase());
-    for (const element of document.querySelectorAll('button,[role="button"],a')) {
-      if (!visible(element)) continue;
-      const text = [element.getAttribute('aria-label'), element.getAttribute('title'), element.textContent]
-        .filter(Boolean).join(' ').trim().toLowerCase();
-      if (lowered.some(word => text.includes(word))) return element;
+  const semanticControl = words => {
+    const lowered = array(words).map(word => String(word).trim().toLowerCase()).filter(Boolean);
+    if (!lowered.length) return null;
+
+    let best = null;
+    let bestScore = -1;
+    for (const element of document.querySelectorAll('button,[role="button"],a,[tabindex]')) {
+      if (element.disabled) continue;
+      const aria = (element.getAttribute('aria-label') || '').trim().toLowerCase();
+      const title = (element.getAttribute('title') || '').trim().toLowerCase();
+      const testId = (element.getAttribute('data-testid') || '').trim().toLowerCase();
+      const text = (element.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      let score = visible(element) ? 2 : 0;
+      for (const word of lowered) {
+        if (aria === word || title === word || text === word) score += 12;
+        else if (aria.includes(word)) score += 9;
+        else if (title.includes(word) || testId.includes(word)) score += 7;
+        else if (text.includes(word)) score += 4;
+      }
+      if (score > bestScore) {
+        best = element;
+        bestScore = score;
+      }
     }
-    return null;
+    return bestScore > 0 ? best : null;
+  };
+
+  const temporarilyClickable = element => {
+    if (!element) return false;
+    const changed = [];
+    let node = element;
+    while (node && node !== document.documentElement) {
+      try {
+        const styleText = node.getAttribute('style');
+        const computed = getComputedStyle(node);
+        let touched = false;
+        if (computed.display === 'none') {
+          node.style.setProperty('display', 'block', 'important');
+          touched = true;
+        }
+        if (computed.visibility === 'hidden') {
+          node.style.setProperty('visibility', 'visible', 'important');
+          touched = true;
+        }
+        if (computed.pointerEvents === 'none') {
+          node.style.setProperty('pointer-events', 'auto', 'important');
+          touched = true;
+        }
+        if (touched) {
+          node.style.setProperty('opacity', '0', 'important');
+          changed.push([node, styleText]);
+        }
+      } catch (_) {}
+      node = node.parentElement;
+    }
+
+    try {
+      element.click();
+    } catch (_) {
+      return false;
+    } finally {
+      setTimeout(() => {
+        for (const [target, oldStyle] of changed) {
+          try {
+            if (oldStyle == null) target.removeAttribute('style');
+            else target.setAttribute('style', oldStyle);
+          } catch (_) {}
+        }
+      }, 0);
+    }
+    return true;
   };
 
   const dispatchInput = (input, value) => {
@@ -97,24 +158,29 @@
   };
 
   const clickAction = (configured, words) => {
-    const element = firstVisible(configured) || semanticButton(words);
-    if (!element) return false;
-    element.click();
-    return true;
+    const element = firstExisting(configured) || semanticControl(words);
+    return temporarilyClickable(element);
   };
 
-  const findComposer = command => firstVisible(selectors(command, 'input')) ||
-    [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].find(visible) || null;
+  const findComposer = command => firstExisting(selectors(command, 'input')) ||
+    [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')]
+      .find(element => !element.disabled) || null;
 
-  const cssList = command => {
-    const all = [
-      ...selectors(command, 'input'),
-      ...selectors(command, 'send'),
-      ...selectors(command, 'stop'),
-      ...selectors(command, 'attachment')
-    ];
-    const unique = [...new Set(all.filter(Boolean))];
-    return unique.map(selector => `html.${APP_CLASS} ${selector}`).join(',\n');
+  const prefixSelectors = list => array(list)
+    .map(selector => `html.${APP_CLASS} ${selector}`)
+    .join(',\n');
+
+  const markComposerShell = command => {
+    for (const old of document.querySelectorAll(`[${COMPOSER_MARK}]`)) old.removeAttribute(COMPOSER_MARK);
+    const input = findComposer(command);
+    if (!input) return;
+    let shell = null;
+    try {
+      shell = input.closest("form,[data-testid*='composer'],[data-testid*='prompt']");
+    } catch (_) {}
+    if (shell && shell !== document.body && shell !== document.documentElement) {
+      shell.setAttribute(COMPOSER_MARK, 'true');
+    }
   };
 
   const applyPresentation = (command, appMode) => {
@@ -125,11 +191,26 @@
       (document.head || document.documentElement).appendChild(style);
     }
 
-    const targets = cssList(command);
-    style.textContent = targets ? `${targets} {
+    markComposerShell(command);
+    const hiddenChrome = prefixSelectors(command.appHide);
+    const hiddenControls = prefixSelectors([
+      ...selectors(command, 'input'),
+      ...selectors(command, 'send'),
+      ...selectors(command, 'stop'),
+      ...selectors(command, 'attachment')
+    ]);
+    const chromeRules = [
+      hiddenChrome,
+      `html.${APP_CLASS} [${COMPOSER_MARK}='true']`
+    ].filter(Boolean).join(',\n');
+
+    style.textContent = `${chromeRules} {
+      display: none !important;
+    }
+    ${hiddenControls} {
       opacity: 0 !important;
       pointer-events: none !important;
-    }` : '';
+    }`;
     document.documentElement.classList.toggle(APP_CLASS, !!appMode);
     return true;
   };
@@ -152,6 +233,12 @@
       } catch (_) {
         respond({ ok: false, url: location.href });
       }
+      return;
+    }
+
+    if (action === 'uiAction') {
+      const clicked = clickAction(command.actionSelectors, command.actionKeywords);
+      respond({ ok: clicked, control: command.uiActionId || '', url: location.href });
       return;
     }
 
