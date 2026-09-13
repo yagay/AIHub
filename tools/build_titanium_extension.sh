@@ -19,4 +19,9 @@ printf '%s\n' "$PROMETHEUS_COMMIT" > "$OUT/UPSTREAM_PROMETHEUS_COMMIT"
 
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$OUT/manifest.json"
 test -s "$OUT/content.js"
-echo "Built Titanium extension from Prometheus@$PROMETHEUS_COMMIT (Browser-Tab mode only)"
+
+# Runtime updater compares this content hash with Titanium's installed copy.
+BUILD_ID="$(cat "$OUT/manifest.json" "$OUT/service-worker.js" "$OUT/content.js" | sha256sum | awk '{print $1}')"
+printf '%s\n' "$BUILD_ID" > "$OUT/.aihub-build-id"
+
+echo "Built Titanium extension $BUILD_ID from Prometheus@$PROMETHEUS_COMMIT (Browser-Tab mode only)"
