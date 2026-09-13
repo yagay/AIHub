@@ -9,7 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Loads built-in, user-created and verified signed provider rules without Chromium dependencies. */
+/** Loads built-in, user-created and verified signed provider rules without browser-engine dependencies. */
 public final class ProviderRuleLoader {
     private final AiHubStateStore stateStore;
     private final List<String> warnings = new ArrayList<>();
@@ -22,9 +22,9 @@ public final class ProviderRuleLoader {
         warnings.clear();
         Map<String, ProviderRuleCodec.Decoded> merged = new LinkedHashMap<>();
 
-        // Lowest priority: JSON rules embedded by apply_chrome_overlay.py. A non-Chromium unit
-        // environment has no generated class and therefore falls back to BuiltinProviders below.
-        for (String raw : AiHubEmbeddedRules.builtinRules()) {
+        // Lowest priority: packaged provider JSON. Chromium builds may provide the same data through
+        // a generated class; the normal WebView app reads it directly from Android assets.
+        for (String raw : AiHubEmbeddedRules.builtinRules(stateStore.context())) {
             try {
                 ProviderRuleCodec.Decoded rule = ProviderRuleCodec.decode(raw);
                 merged.put(rule.provider().id(), rule);
@@ -57,7 +57,7 @@ public final class ProviderRuleLoader {
         }
 
         if (merged.isEmpty()) {
-            warnings.add("No generated provider rules found; using built-in Java fallback registry");
+            warnings.add("No packaged provider rules found; using built-in Java fallback registry");
             return BuiltinProviders.createDefaultRegistry();
         }
 
