@@ -146,8 +146,6 @@ public final class TitaniumManager {
 
         exists = runSu("[ -d " + q(userData) + " ] && echo yes || true", 5).trim();
         if (!"yes".equals(exists)) {
-            // Chromium normally creates app_chrome itself. Create it only as a last resort,
-            // with Titanium's own UID and private permissions.
             runSu("mkdir -p " + q(userData) + " && chown " + uid + ":" + uid + " " + q(userData)
                     + " && chmod 700 " + q(userData), 8);
         }
@@ -275,8 +273,22 @@ public final class TitaniumManager {
         file.delete();
     }
 
+    /**
+     * KernelSU/Magisk root can still inherit the caller app's mount namespace on
+     * modern Android. In that namespace another app's /data/user/<id>/<package>
+     * directory may look nonexistent even with uid 0. Prefer PID 1's mount
+     * namespace for Titanium private-data operations, then fall back gracefully
+     * when nsenter is unavailable.
+     */
     private static String runSu(String command, int timeoutSeconds) throws Exception {
-        ProcessBuilder builder = new ProcessBuilder("su", "-c", command);
+        String inner = q(command);
+        String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                + "nsenter -t 1 -m sh -c " + inner
+                + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                + "toybox nsenter -t 1 -m sh -c " + inner
+                + "; else sh -c " + inner + "; fi";
+
+        ProcessBuilder builder = new ProcessBuilder("su", "-c", namespaced);
         builder.redirectErrorStream(true);
         java.lang.Process process;
         try {
