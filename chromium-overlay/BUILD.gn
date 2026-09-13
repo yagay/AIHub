@@ -44,6 +44,7 @@ android_library("aihub_core_java") {
     "../aihub-core/src/main/java/com/yagay/aihub/core/WorkspaceRegistry.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommand.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandBus.java",
+    "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandTarget.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandType.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/CommandResult.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/provider/BuiltinProviders.java",
