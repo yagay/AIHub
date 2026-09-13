@@ -16,5 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "AIHub"
 include(":app")
-include(":aihub-core")
-include(":aihub-android")
