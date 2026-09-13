@@ -40,13 +40,33 @@ public final class CoreSmokeTest {
         check(bus.execute(AiCommand.switchTo("chatgpt", null, "personal")).success(), "activate personal GPT");
         check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_personal")), "workspace account mapping");
         check("personal".equals(sessions.activeWorkspaceId()), "workspace retained");
-
         check(bus.execute(AiCommand.send("hello")).success(), "send");
-        sessions.switchProvider("claude");
-        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_personal")), "provider switch keeps workspace");
+
+        // Provider-only external targeting must preserve the currently active workspace mapping.
+        check(bus.execute(AiCommand.sendTo("claude", null, null, "workspace target")).success(),
+                "provider-only send");
+        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_personal")),
+                "provider-only command keeps workspace account mapping");
+        check("personal".equals(sessions.activeWorkspaceId()),
+                "provider-only command keeps active workspace");
+
+        // Explicit account targeting is stronger than a workspace and intentionally exits workspace mode.
+        check(bus.execute(AiCommand.sendTo("chatgpt", "gpt_work", null, "explicit account")).success(),
+                "explicit account send");
+        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")),
+                "explicit account selected exactly");
+        check(sessions.activeWorkspaceId() == null, "explicit account exits workspace mode");
+
+        AiSessionKey beforeMismatch = sessions.currentKey();
+        check(!bus.execute(AiCommand.sendTo("claude", "gpt_work", null, "must reject")).success(),
+                "provider/account mismatch rejected");
+        check(beforeMismatch.equals(sessions.currentKey()), "rejected mismatch does not change session");
 
         sessions.switchWorkspace("work");
-        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_work")), "workspace switch");
+        check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "workspace switch");
+        sessions.switchProvider("claude");
+        check(sessions.currentKey().equals(new AiSessionKey("claude", "claude_work")),
+                "provider switch keeps workspace");
         sessions.previousProvider();
         check(sessions.currentKey().equals(new AiSessionKey("chatgpt", "gpt_work")), "previous provider keeps workspace");
 
@@ -77,6 +97,10 @@ public final class CoreSmokeTest {
         check(rejectedLastAccountRemoval, "last provider account cannot be removed");
 
         check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_personal:hello")), "send event");
+        check(runtime.events().stream().anyMatch(e -> e.startsWith("send:claude:claude_personal:workspace target")),
+                "provider-only workspace send event");
+        check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_work:explicit account")),
+                "explicit account send event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("back:claude:claude_work")), "back event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:claude:claude_work")), "forward event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("reload:claude:claude_work")), "reload event");
