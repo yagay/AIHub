@@ -6,76 +6,76 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 errors: list[str] = []
 
-core_root = ROOT / "aihub-core" / "src" / "main" / "java"
-android_root = ROOT / "aihub-android" / "java"
-seam_root = ROOT / "chromium-overlay" / "java" / "com" / "yagay" / "aihub" / "chromium"
-provider_root = ROOT / "chromium-overlay" / "assets" / "aihub" / "providers"
+CORE = ROOT / "aihub-core" / "src" / "main" / "java"
+ANDROID = ROOT / "aihub-android" / "java"
+APP = ROOT / "app" / "src" / "main"
+PROVIDERS = ROOT / "aihub-android" / "src" / "main" / "assets" / "aihub" / "providers"
 
 
-def text(path: pathlib.Path) -> str:
+def read(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def require_file(relative: str) -> pathlib.Path:
+def require(relative: str) -> pathlib.Path:
     path = ROOT / relative
     if not path.is_file():
         errors.append(f"Missing required file: {relative}")
     return path
 
 
-# Required architecture surface.
-required_files = (
+required = (
+    "app/build.gradle.kts",
+    "app/src/main/AndroidManifest.xml",
+    "app/src/main/java/com/yagay/aihub/app/MainActivity.java",
+    "app/src/main/java/com/yagay/aihub/app/WebViewBrowserHost.java",
+    "aihub-android/build.gradle.kts",
     "aihub-android/java/com/yagay/aihub/android/AiHubBrowserHost.java",
     "aihub-android/java/com/yagay/aihub/android/BrowserSessionRuntime.java",
     "aihub-android/java/com/yagay/aihub/android/AiHubUiCoordinator.java",
     "aihub-android/java/com/yagay/aihub/android/GenericDomScriptFactory.java",
     "aihub-android/java/com/yagay/aihub/android/ProviderRuleLoader.java",
-    "chromium-overlay/java/com/yagay/aihub/chromium/AiHubChromeBridge.java",
-    "chromium-overlay/java/com/yagay/aihub/chromium/AiHubChromeHook.java",
-    "chromium-overlay/assets/aihub/rules_public_key.txt",
-    "scripts/apply_chrome_overlay.py",
-    "scripts/check_chromium_checkout.py",
-    "scripts/build_aihub_chromium.sh",
-    "scripts/install_aihub_local.sh",
-    "docs/ARCHITECTURE.md",
-    "docs/CHROMIUM_INTEGRATION.md",
-    "docs/INTEGRATION_TEST_CHECKLIST.md",
+    "aihub-android/src/main/assets/aihub/providers/index.txt",
+    "aihub-android/src/main/assets/aihub/rules_public_key.txt",
 )
-for relative in required_files:
-    require_file(relative)
+for item in required:
+    require(item)
 
-# Standalone WebEngine APK architecture must not return.
+# The old full-Chromium build stays only on archive/chromium-overlay, never on main.
 for obsolete in (
-    "chromium-overlay/AndroidManifest.xml",
-    "chromium-overlay/BUILD.gn",
-    "chromium-overlay/res/layout/aihub_activity_main.xml",
-    "chromium-overlay/java/com/yagay/aihub/chromium/AiWebEngineHost.java",
-    "chromium-overlay/java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
-    "chromium-overlay/java/com/yagay/aihub/chromium/AiHubShellActivity.java",
-    "chromium-overlay/java/com/yagay/aihub/chromium/AiHubEntryActivity.java",
-    "android-api/src/main/aidl/com/yagay/aihub/api/IAiHubService.aidl",
+    "chromium-overlay",
+    "chromium.version",
+    ".github/workflows/build-chromium.yml",
+    "scripts/apply_chrome_overlay.py",
+    "scripts/build_aihub_chromium.sh",
+    "scripts/build_install_aihub.sh",
+    "scripts/check_chromium_checkout.py",
+    "scripts/install_aihub_local.sh",
+    "scripts/sync_to_chromium.sh",
+    "scripts/test_chrome_overlay.py",
 ):
     if (ROOT / obsolete).exists():
-        errors.append(f"Obsolete standalone/WebEngine file returned: {obsolete}")
+        errors.append(f"Archived Chromium-only path must not exist on main: {obsolete}")
 
-# Provider configuration remains JSON-driven.
-provider_files = sorted(provider_root.glob("*.json")) if provider_root.is_dir() else []
-if len(provider_files) < 5:
-    errors.append("Expected at least five built-in provider JSON rules")
-for expected in ("chatgpt", "claude", "gemini", "grok", "deepseek"):
-    if not (provider_root / f"{expected}.json").is_file():
-        errors.append(f"Missing built-in provider rule: {expected}.json")
+# Provider rules are packaged Android assets and indexed explicitly.
+provider_files = sorted(PROVIDERS.glob("*.json")) if PROVIDERS.is_dir() else []
+expected = {"chatgpt.json", "claude.json", "gemini.json", "grok.json", "deepseek.json"}
+actual = {path.name for path in provider_files}
+if not expected.issubset(actual):
+    errors.append(f"Missing built-in provider assets: {sorted(expected - actual)}")
+if (PROVIDERS / "index.txt").is_file():
+    indexed = {
+        line.strip() for line in read(PROVIDERS / "index.txt").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if indexed != actual:
+        errors.append(f"Provider index does not match JSON assets: index={sorted(indexed)}, files={sorted(actual)}")
 
-# Stable core must stay pure Java and provider-only.
-for path in core_root.rglob("*.java"):
-    source = text(path)
-    for forbidden_import in (
-        "import android.",
-        "import androidx.",
-        "import org.chromium.",
-    ):
-        if forbidden_import in source:
-            errors.append(f"Core leaked platform/browser dependency: {path.relative_to(ROOT)}")
+# Core stays pure Java and provider-only.
+for path in CORE.rglob("*.java"):
+    source = read(path)
+    for forbidden in ("import android.", "import androidx.", "import org.chromium."):
+        if forbidden in source:
+            errors.append(f"Core leaked platform dependency: {path.relative_to(ROOT)}")
     for forbidden in (
         "AiAccount", "AccountRegistry", "AiWorkspace", "WorkspaceRegistry",
         "accountId", "workspaceId", "EXTRA_ACCOUNT_ID", "EXTRA_WORKSPACE_ID",
@@ -83,131 +83,82 @@ for path in core_root.rglob("*.java"):
         if forbidden in source:
             errors.append(f"Provider-only core contains {forbidden}: {path.relative_to(ROOT)}")
 
-# Stable Android layer may use Android APIs but never Chromium internals.
-chromium_import = re.compile(
-    r'^\s*import\s+org\.chromium\.(?:chrome|content_public|webengine)(?:\.|;)',
-    re.MULTILINE,
-)
-for path in android_root.rglob("*.java"):
-    source = text(path)
-    if chromium_import.search(source):
+# Stable Android layer is browser-engine neutral. WebView itself belongs in :app.
+for path in ANDROID.rglob("*.java"):
+    source = read(path)
+    if re.search(r'^\s*import\s+org\.chromium\.', source, re.MULTILINE):
         errors.append(f"Chromium API leaked into stable Android layer: {path.relative_to(ROOT)}")
-    if "org.chromium.webengine" in source:
-        errors.append(f"Legacy WebEngine reference in stable Android layer: {path.relative_to(ROOT)}")
+    if re.search(r'^\s*import\s+android\.webkit\.WebView\s*;', source, re.MULTILINE):
+        errors.append(f"Concrete WebView leaked into stable Android layer: {path.relative_to(ROOT)}")
 
-# Exactly two Java files form the Chromium seam.
-if seam_root.is_dir():
-    seam_files = sorted(path.name for path in seam_root.glob("*.java"))
-else:
-    seam_files = []
-expected_seam = ["AiHubChromeBridge.java", "AiHubChromeHook.java"]
-if seam_files != expected_seam:
-    errors.append(f"Chromium seam must contain only {expected_seam}; found {seam_files}")
-
-bridge_path = seam_root / "AiHubChromeBridge.java"
-hook_path = seam_root / "AiHubChromeHook.java"
-if bridge_path.is_file():
-    bridge = text(bridge_path)
-    for required in (
+host_path = APP / "java" / "com" / "yagay" / "aihub" / "app" / "WebViewBrowserHost.java"
+if host_path.is_file():
+    host = read(host_path)
+    for required_text in (
         "implements AiHubBrowserHost",
-        "ChromeTabbedActivity",
-        "TabModelSelector",
-        "TabModelUtils.runOnTabStateInitialized",
-        "createNewTab(",
-        "executeJavaScriptInIsolatedWorld(",
-        "getMainFrame()",
-        "getCurrentTab()",
-        "TabClosureParams.closeTab(",
+        "new WebView(activity)",
+        "CookieManager.getInstance()",
+        "onShowFileChooser(",
+        "PermissionRequest",
+        "onGeolocationPermissionsShowPrompt(",
+        "onCreateWindow(",
+        "onCloseWindow(",
+        "DownloadManager",
+        "onRenderProcessGone(",
+        "evaluateJavascript(",
+        "setSafeBrowsingEnabled(true)",
     ):
-        if required not in bridge:
-            errors.append(f"AiHubChromeBridge missing required current-Chrome seam: {required}")
-    if "org.chromium.webengine" in bridge or "weblayer" in bridge.lower():
-        errors.append("AiHubChromeBridge must not depend on legacy WebEngine/WebLayer")
+        if required_text not in host:
+            errors.append(f"WebViewBrowserHost missing browser capability: {required_text}")
+    if "setJavaScriptEnabled(true)" not in host or "setDomStorageEnabled(true)" not in host:
+        errors.append("WebView browser must enable JavaScript and DOM storage for AI sites")
+    if "setAllowFileAccess(false)" not in host:
+        errors.append("WebView browser must keep direct file:// access disabled")
+    if "MIXED_CONTENT_NEVER_ALLOW" not in host:
+        errors.append("WebView browser must reject mixed content")
 
-if hook_path.is_file():
-    hook = text(hook_path)
-    if "AiHubUiCoordinator.attachConfigured" not in hook:
-        errors.append("AiHubChromeHook must start the configured provider/UI coordinator")
-    imported_chromium = re.findall(r'^\s*import\s+(org\.chromium\.[^;]+);', hook, re.MULTILINE)
-    if imported_chromium != ["org.chromium.chrome.browser.ChromeTabbedActivity"]:
-        errors.append(
-            "AiHubChromeHook must depend on only ChromeTabbedActivity; "
-            f"found Chromium imports {imported_chromium}")
-
-runtime_path = android_root / "com" / "yagay" / "aihub" / "android" / "BrowserSessionRuntime.java"
-if runtime_path.is_file():
-    runtime = text(runtime_path)
-    if "implements SessionRuntime" not in runtime:
-        errors.append("BrowserSessionRuntime must implement stable SessionRuntime")
-    for method in (
-        "open(", "activate(", "close(", "sendText(", "newChat(", "stop(",
-        "attach(", "attachAndSend(", "back(", "forward(", "reload(",
+manifest_path = APP / "AndroidManifest.xml"
+if manifest_path.is_file():
+    manifest = read(manifest_path)
+    for permission in (
+        "android.permission.INTERNET",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
     ):
-        if method not in runtime:
-            errors.append(f"BrowserSessionRuntime missing SessionRuntime operation {method}")
-    if "openAttachmentChooser()" not in runtime:
-        errors.append("Normal attachment flow must use the website/Chrome native file chooser")
+        if permission not in manifest:
+            errors.append(f"Manifest missing browser capability permission: {permission}")
+    if 'android:usesCleartextTraffic="false"' not in manifest:
+        errors.append("App must keep cleartext traffic disabled")
 
-ui_path = android_root / "com" / "yagay" / "aihub" / "android" / "AiHubUiCoordinator.java"
-if ui_path.is_file():
-    ui = text(ui_path)
-    for required in (
-        "attachConfigured(", "＋ AI", "CustomProviderFactory.create(",
-        "showChromeControls(", "sessions.sendText(",
+app_gradle = ROOT / "app" / "build.gradle.kts"
+if app_gradle.is_file():
+    source = read(app_gradle)
+    for expected_text in (
+        'applicationId = "com.yagay.aihub"',
+        "minSdk = 31",
+        "compileSdk = 36",
+        "targetSdk = 36",
+        'implementation(project(":aihub-android"))',
+        'androidx.webkit:webkit:1.17.0',
     ):
-        if required not in ui:
-            errors.append(f"AI-first UI missing expected capability: {required}")
+        if expected_text not in source:
+            errors.append(f"App Gradle missing invariant: {expected_text}")
 
-# Overlay patcher is the only source-list/activity mutation path.
-patcher_path = ROOT / "scripts" / "apply_chrome_overlay.py"
-if patcher_path.is_file():
-    patcher = text(patcher_path)
-    for required in (
-        "AIHUB-SOURCES-BEGIN",
-        "AIHUB-SOURCES-END",
-        "AiHubChromeHook.attach(this)",
-        "performPostInflationStartup()",
-        "mControlContainer = findViewById(R.id.control_container);",
-        "AiHubGeneratedRules.java",
-        "chromium-overlay\" / \"assets\" / \"aihub\" / \"providers",
-    ):
-        if required not in patcher:
-            errors.append(f"Chrome overlay patcher missing invariant: {required}")
-    if "weblayer" in patcher.lower() or "webengine" in patcher.lower():
-        errors.append("Chrome overlay patcher must not target WebLayer/WebEngine")
+settings = ROOT / "settings.gradle.kts"
+if settings.is_file():
+    source = read(settings)
+    for module in ('include(":app")', 'include(":aihub-core")', 'include(":aihub-android")'):
+        if module not in source:
+            errors.append(f"settings.gradle.kts missing {module}")
 
-# Build/install flow must produce and run the full Chromium browser.
-build_script = text(ROOT / "scripts" / "build_aihub_chromium.sh")
-install_script = text(ROOT / "scripts" / "install_aihub_local.sh")
-for required in ("chrome_public_apk", "ChromePublic.apk", "apply_chrome_overlay.py"):
-    if required not in build_script:
-        errors.append(f"build_aihub_chromium.sh missing {required}")
-for forbidden in ("aihub_apk", "weblayer_support", "webengine", "AIHub.apk"):
-    if forbidden.lower() in build_script.lower():
-        errors.append(f"build_aihub_chromium.sh still contains legacy target {forbidden}")
-if "$OUT/bin/chrome_public_apk" not in install_script:
-    errors.append("install_aihub_local.sh must use Chromium's chrome_public_apk runner")
-for forbidden in ("AiHubEntryActivity", "AIHub.apk", "WebEngine", "WebLayer"):
-    if forbidden.lower() in install_script.lower():
-        errors.append(f"install_aihub_local.sh still contains standalone/WebEngine path: {forbidden}")
-
-# Chromium compatibility checker must target current Chrome Android, not removed WebLayer.
-checker = text(ROOT / "scripts" / "check_chromium_checkout.py")
-for required in (
-    "ChromeTabbedActivity", "TabModelSelector", "TabModelUtils", "RenderFrameHost",
-    "executeJavaScriptInIsolatedWorld(", "chrome_java_sources.gni", "chrome_public_apk",
-):
-    if required not in checker:
-        errors.append(f"Chromium compatibility checker missing {required}")
-
-# Shell/Python syntax conventions and no old standalone identifiers in active scripts.
-for path in (ROOT / "scripts").glob("*.sh"):
-    source = text(path)
-    if not source.startswith("#!/usr/bin/env bash"):
-        errors.append(f"Shell script missing bash shebang: {path.name}")
-    for legacy in ("AiHubEntryActivity", "aihub_apk", "weblayer_support_apk"):
-        if legacy in source:
-            errors.append(f"Shell script still contains legacy identifier {legacy}: {path.name}")
+workflow = ROOT / ".github" / "workflows" / "core.yml"
+if workflow.is_file():
+    source = read(workflow)
+    if "ubuntu-latest" not in source or ":app:assembleDebug" not in source:
+        errors.append("GitHub Actions must build the lightweight Android app on ubuntu-latest")
+    if "self-hosted" in source or "chrome_public_apk" in source:
+        errors.append("Main Android workflow must not compile full Chromium")
 
 if errors:
     print("AIHub repository validation failed:")
@@ -216,4 +167,4 @@ if errors:
     sys.exit(1)
 
 print("AIHub repository validation passed")
-print("architecture: aihub-core -> aihub-android -> AiHubChromeBridge/Hook -> chrome_public_apk")
+print("architecture: aihub-core -> aihub-android -> WebViewBrowserHost -> Android System WebView")
