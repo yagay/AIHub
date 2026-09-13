@@ -1,0 +1,7 @@
+{
+  "id": "grok",
+  "displayName": "Grok",
+  "homeUrl": "https://grok.com/",
+  "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
+  "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
+}

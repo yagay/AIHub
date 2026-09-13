@@ -1,0 +1,12 @@
+{
+  "id": "chatgpt",
+  "displayName": "ChatGPT",
+  "homeUrl": "https://chatgpt.com/",
+  "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
+  "selectors": {
+    "input": [],
+    "send": [],
+    "newChat": [],
+    "stop": []
+  }
+}

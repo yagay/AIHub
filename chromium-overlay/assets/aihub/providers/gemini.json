@@ -1,0 +1,7 @@
+{
+  "id": "gemini",
+  "displayName": "Gemini",
+  "homeUrl": "https://gemini.google.com/",
+  "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
+  "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
+}

@@ -1,0 +1,7 @@
+.out/
+out/
+*.apk
+*.aab
+*.class
+.gradle/
+.idea/

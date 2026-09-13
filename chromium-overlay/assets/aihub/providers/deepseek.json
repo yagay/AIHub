@@ -1,0 +1,7 @@
+{
+  "id": "deepseek",
+  "displayName": "DeepSeek",
+  "homeUrl": "https://chat.deepseek.com/",
+  "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
+  "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
+}

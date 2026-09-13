@@ -1,0 +1,7 @@
+{
+  "id": "claude",
+  "displayName": "Claude",
+  "homeUrl": "https://claude.ai/",
+  "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
+  "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
+}

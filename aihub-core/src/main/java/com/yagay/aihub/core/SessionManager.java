@@ -1,0 +1,137 @@
+package com.yagay.aihub.core;
+
+import com.yagay.aihub.core.provider.ProviderRegistry;
+import com.yagay.aihub.core.runtime.SessionRuntime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Single switching entry point for provider switching, account switching and workspace switching.
+ */
+public final class SessionManager {
+    private final ProviderRegistry providers;
+    private final AccountRegistry accounts;
+    private final WorkspaceRegistry workspaces;
+    private final SessionRuntime runtime;
+    private final Map<AiSessionKey, AiSession> sessions = new LinkedHashMap<>();
+    private final Map<String, String> lastAccountByProvider = new LinkedHashMap<>();
+    private AiSessionKey current;
+
+    public SessionManager(
+            ProviderRegistry providers,
+            AccountRegistry accounts,
+            WorkspaceRegistry workspaces,
+            SessionRuntime runtime) {
+        this.providers = Objects.requireNonNull(providers);
+        this.accounts = Objects.requireNonNull(accounts);
+        this.workspaces = Objects.requireNonNull(workspaces);
+        this.runtime = Objects.requireNonNull(runtime);
+    }
+
+    public synchronized AiSession activate(String providerId, String accountId, String workspaceId) {
+        AiSessionKey key = resolve(providerId, accountId, workspaceId);
+        ProviderConfig provider = providers.require(key.providerId());
+        AiAccount account = accounts.require(key.accountId());
+        if (!account.providerId().equals(provider.id())) {
+            throw new IllegalArgumentException("Account " + account.id() + " does not belong to " + provider.id());
+        }
+        AiSession session = sessions.get(key);
+        if (session == null) {
+            session = new AiSession(key, provider.homeUrl());
+            sessions.put(key, session);
+            runtime.open(key, provider, account);
+        }
+        runtime.activate(key);
+        session.markActivated();
+        session.setState(SessionState.READY);
+        current = key;
+        lastAccountByProvider.put(key.providerId(), key.accountId());
+        return session;
+    }
+
+    public synchronized AiSession current() {
+        if (current == null) throw new IllegalStateException("No active AI session");
+        return sessions.get(current);
+    }
+
+    public synchronized AiSessionKey currentKey() {
+        return current().key();
+    }
+
+    public synchronized AiSession switchProvider(String providerId) {
+        return activate(providerId, null, null);
+    }
+
+    public synchronized AiSession switchAccount(String accountId) {
+        AiAccount account = accounts.require(accountId);
+        return activate(account.providerId(), account.id(), null);
+    }
+
+    public synchronized AiSession switchWorkspace(String workspaceId) {
+        String providerId = current != null ? current.providerId() : firstProviderId();
+        return activate(providerId, null, workspaceId);
+    }
+
+    public synchronized AiSession nextProvider() {
+        return moveProvider(1);
+    }
+
+    public synchronized AiSession previousProvider() {
+        return moveProvider(-1);
+    }
+
+    public synchronized void sendText(String text) {
+        if (text == null || text.isBlank()) return;
+        runtime.sendText(currentKey(), text);
+    }
+
+    public synchronized void newChat() { runtime.newChat(currentKey()); }
+    public synchronized void stop() { runtime.stop(currentKey()); }
+    public synchronized void attach(List<String> uris) { runtime.attach(currentKey(), List.copyOf(uris)); }
+
+    public synchronized Map<AiSessionKey, AiSession> snapshot() {
+        return Map.copyOf(sessions);
+    }
+
+    private AiSession moveProvider(int delta) {
+        List<ProviderConfig> all = providers.all();
+        if (all.isEmpty()) throw new IllegalStateException("No providers registered");
+        String now = current != null ? current.providerId() : all.get(0).id();
+        int index = 0;
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).id().equals(now)) { index = i; break; }
+        }
+        int next = Math.floorMod(index + delta, all.size());
+        return activate(all.get(next).id(), null, null);
+    }
+
+    private AiSessionKey resolve(String providerId, String accountId, String workspaceId) {
+        String p = providerId;
+        if (p == null || p.isBlank()) {
+            p = current != null ? current.providerId() : firstProviderId();
+        }
+        providers.require(p);
+
+        String a = accountId;
+        if ((a == null || a.isBlank()) && workspaceId != null && !workspaceId.isBlank()) {
+            a = workspaces.require(workspaceId).accountFor(p);
+        }
+        if (a == null || a.isBlank()) a = lastAccountByProvider.get(p);
+        if (a == null || a.isBlank()) {
+            List<AiAccount> candidates = accounts.forProvider(p);
+            if (candidates.isEmpty()) {
+                throw new IllegalStateException("No account registered for provider: " + p);
+            }
+            a = candidates.get(0).id();
+        }
+        return new AiSessionKey(p, a);
+    }
+
+    private String firstProviderId() {
+        List<ProviderConfig> all = providers.all();
+        if (all.isEmpty()) throw new IllegalStateException("No providers registered");
+        return all.get(0).id();
+    }
+}
