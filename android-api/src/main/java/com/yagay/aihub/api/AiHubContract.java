@@ -17,8 +17,6 @@ public final class AiHubContract {
     public static final String ACTION_PREVIOUS_PROVIDER = "com.yagay.aihub.action.PREVIOUS_PROVIDER";
 
     public static final String EXTRA_PROVIDER_ID = "provider_id";
-    public static final String EXTRA_ACCOUNT_ID = "account_id";
-    public static final String EXTRA_WORKSPACE_ID = "workspace_id";
     public static final String EXTRA_TEXT = "text";
     public static final String EXTRA_URI_LIST = "uri_list";
     public static final String EXTRA_CLIENT_TOKEN = "client_token";
