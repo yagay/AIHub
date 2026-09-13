@@ -1,194 +1,172 @@
 # AIHub Chromium / Android integration test checklist
 
-Use this checklist after the repository-side CI is green and a real Chromium Android checkout/device is available. Do not mark an item complete from the Java smoke test alone.
+Use this checklist after repository-side CI is green and a real Chromium Android checkout/device is available. Do not mark an item complete from the Java smoke test alone.
 
 ## 1. Verify the selected Chromium revision
 
 - [ ] `gclient sync` completes successfully.
 - [ ] `build/android/envsetup.sh` has been sourced.
 - [ ] the GN output contains `target_os = "android"`.
-- [ ] Chromium's stock WebEngine sample builds:
+- [ ] Chromium's stock WebEngine sample builds and launches on the target device.
+- [ ] `python3 scripts/check_chromium_checkout.py /path/to/chromium/src` passes.
 
-```bash
-autoninja -C out/Default run_webengine_shell_local
-```
-
-- [ ] Chromium's stock WebEngine sample launches on the target device:
-
-```bash
-out/Default/bin/run_webengine_shell_local
-```
-
-If this stock sample fails, resolve the Chromium/device environment before changing AIHub.
+If the stock WebEngine sample fails, resolve the Chromium/device environment before changing AIHub.
 
 ## 2. Build and install AIHub
 
-- [ ] Run the one-command flow:
+- [ ] Run:
 
 ```bash
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
 ```
 
-- [ ] `check_chromium_checkout.py` passes.
 - [ ] `gn desc` resolves `//aihub/chromium-overlay:aihub_apk`.
 - [ ] `//aihub/chromium-overlay:aihub_local` builds.
 - [ ] `AIHub.apk` installs.
-- [ ] the local WebEngine support APK installs when the revision produces one.
-- [ ] the installer launches `AiHubEntryActivity`, not `AiHubShellActivity`.
+- [ ] the matching local WebEngine support APK installs when required by the revision.
+- [ ] installer launches `AiHubEntryActivity`, not the unexported shell directly.
 - [ ] app starts without renderer/service crashes.
 
-## 3. Built-in provider website/login smoke tests
+## 3. Built-in provider login smoke tests
 
-Test each built-in provider on the selected Chromium revision:
+For ChatGPT, Claude, Gemini, Grok and DeepSeek:
 
-- [ ] ChatGPT opens and accepts normal website login.
-- [ ] Claude opens and accepts normal website login.
-- [ ] Gemini opens and accepts normal website login.
-- [ ] Grok opens and accepts normal website login.
-- [ ] DeepSeek opens and accepts normal website login.
-- [ ] Google/OAuth flows, when used by a provider website, stay in the real Chromium browsing environment rather than an Android WebView workaround.
+- [ ] website opens normally.
+- [ ] normal website login works.
+- [ ] login survives switching away and back.
+- [ ] login survives process/app restart as supported by the selected WebEngine revision.
+- [ ] Google/OAuth redirects remain inside the real Chromium browsing environment.
+- [ ] popup/new-tab login flows do not leave AIHub actions attached to a stale tab.
 
-Record any provider-specific website behavior as diagnostics/rule data before adding code branches.
+AIHub has one retained Chromium profile/session per provider. There is no multi-account/workspace test matrix.
 
-## 4. Unified composer/action tests
+## 4. Active-tab behavior
+
+For at least one provider that uses an OAuth popup/new tab:
+
+- [ ] start on the provider tab.
+- [ ] launch the login popup/new tab.
+- [ ] confirm Chromium changes the active tab as expected.
+- [ ] AIHub Back/Forward/Reload target the current active tab.
+- [ ] AIHub diagnostics report the current active tab URL.
+- [ ] after login returns to the provider page, AIHub Send/New chat/Stop operate on the active provider page.
+- [ ] attachment upload captures one active tab at upload start and does not split one upload across tabs.
+
+## 5. Unified composer/action tests
 
 For every built-in provider:
 
 - [ ] generic input discovery finds the current composer.
-- [ ] text insertion fires the website's expected input state.
+- [ ] text insertion triggers the website's input state.
 - [ ] Send works.
 - [ ] Enter fallback works where applicable.
 - [ ] New chat works or reports a clean rule/probe failure.
 - [ ] Stop generation works while an answer is streaming.
-- [ ] provider diagnostics report the current URL/input/send/new-chat/stop/file capability state.
+- [ ] provider diagnostics report current URL/input/send/new-chat/stop/file capability state.
 
-If one provider changes its DOM, first update JSON selectors or semantic rules; do not duplicate the whole controller.
+If one provider changes its DOM, update JSON selectors/semantic rules before adding code branches.
 
-## 5. AI switching/session retention
+## 6. AI switching/session retention
 
-- [ ] log into at least three different AI providers.
-- [ ] open an active conversation on each.
-- [ ] switch provider repeatedly with the picker.
+- [ ] log into at least three providers.
+- [ ] open a conversation on each.
+- [ ] switch repeatedly using the horizontal AI rail.
 - [ ] switch with Previous AI / Next AI.
-- [ ] switching does not intentionally reload already-open sessions.
+- [ ] switching does not intentionally reload an already-open provider session.
 - [ ] scroll position/conversation page remains usable after returning.
-- [ ] a response that continues while another AI is visible can be revisited safely.
-- [ ] back / forward / reload target only the active session.
+- [ ] background generation can be revisited safely.
+- [ ] back / forward / reload target only the visible provider's current active tab.
 
-## 6. Multi-account isolation
-
-For one provider, create at least two accounts:
-
-- [ ] Account A and Account B have different WebEngine profile names.
-- [ ] log into different website identities in A and B.
-- [ ] switching A → B → A restores the expected login identity each time.
-- [ ] cookies/localStorage/IndexedDB do not appear to cross accounts.
-- [ ] renaming an AIHub account does not change its profile identity.
-- [ ] removing a non-current account repairs workspace mappings.
-- [ ] removing the current account closes/replaces its active session cleanly.
-- [ ] AIHub prevents removal of the last account for a provider.
-
-Removing an account from AIHub is not considered a verified browser-profile wipe unless the selected WebEngine API provides and passes a supported deletion test.
-
-## 7. Workspace tests
-
-- [ ] create Personal and Work workspaces.
-- [ ] map different provider accounts into each workspace.
-- [ ] switch workspace and confirm the active provider switches to the workspace-mapped account.
-- [ ] switch AI inside a workspace and confirm each provider uses its mapped account.
-- [ ] manually choose a different account while a workspace is active and confirm only that provider mapping changes.
-- [ ] rename workspace.
-- [ ] delete inactive workspace.
-- [ ] delete active workspace and confirm AIHub returns to non-workspace account mode without a stale ID.
-- [ ] stale/wrong-provider mapping falls back instead of crashing.
-
-## 8. File and image attachments
+## 7. File and image attachments
 
 - [ ] Android document picker opens from the common Attach button.
 - [ ] single image upload reaches the active provider website.
 - [ ] PDF/file upload reaches providers that support it.
-- [ ] multi-file selection works where the provider supports multiple files.
+- [ ] multi-file selection works where supported.
 - [ ] unsupported/no-file-input pages fail cleanly rather than sending the prompt accidentally.
 - [ ] the 64 MiB aggregate AIHub bridge limit is enforced.
 - [ ] Android share of file only attaches the file.
-- [ ] Android share of file + text waits for successful attachment injection before sending text.
+- [ ] Android share of file + text waits for attachment injection before sending text.
 
-## 9. External-entry security tests
+## 8. Browser media / permission capabilities
+
+The host manifest declares browser capability permissions, but the selected WebEngine revision must still be verified to provide the site/browser permission flow.
+
+- [ ] camera permission request is user-visible and denial is respected.
+- [ ] microphone permission request is user-visible and denial is respected.
+- [ ] provider voice/WebRTC works after permission is granted.
+- [ ] location request is user-visible and denial is respected.
+- [ ] notification behavior is tested on Android 13+.
+- [ ] AIHub never silently grants a website permission.
+
+If WebEngine requires an embedder callback in this revision, implement it in `AiWebEngineHost.java`, not provider code.
+
+## 9. Native Chromium browser behavior
+
+- [ ] autofill/password-manager behavior matches the selected WebEngine revision.
+- [ ] safe-browsing behavior remains enabled/usable as provided by WebEngine.
+- [ ] external/native intent handling used by login/payment flows behaves correctly.
+- [ ] downloads are tested before AIHub claims download support.
+- [ ] popup/new-window behavior is tested before adding any AIHub-specific fallback.
+- [ ] loading/progress observer API is verified before wiring a custom progress indicator.
+
+Do not implement provider-specific browser subsystems to make this checklist pass.
+
+## 10. External-entry security tests
 
 ### Activity exposure
 
 - [ ] `AiHubEntryActivity` is exported.
 - [ ] `AiHubShellActivity` is not exported.
-- [ ] explicit external launch of `AiHubShellActivity` is rejected by Android.
+- [ ] direct external launch of `AiHubShellActivity` is rejected by Android.
 
 ### Android shares
 
-- [ ] text share displays confirmation.
-- [ ] file share displays confirmation.
+- [ ] text/file shares display confirmation.
 - [ ] Cancel performs no AI action.
 - [ ] Confirm forwards exactly once.
 
 ### Deep links
 
 - [ ] `aihub://send?provider=gemini&text=hello` displays confirmation.
-- [ ] deep-link URL contains no client token.
-- [ ] Cancel performs no action.
-- [ ] Confirm performs exactly one action.
+- [ ] URL contains no client token.
 - [ ] malformed/unknown commands are rejected.
 
-### Token-gated custom Intent
+### Token-gated Intent/Binder
 
 - [ ] correct client token allows unattended action.
-- [ ] missing token is rejected.
-- [ ] incorrect token is rejected.
+- [ ] missing/incorrect token is rejected.
 - [ ] rotating the token immediately invalidates old integrations.
-- [ ] Activity recreation does not replay an already-consumed internal dispatch.
+- [ ] Activity recreation does not replay consumed dispatch.
 - [ ] repeated `singleTop` requests are revalidated through `onNewIntent`.
+- [ ] Binder can list providers and query the current provider/session state.
+- [ ] Binder can switch/send/new/stop/attach/navigate.
+- [ ] Binder never returns cookies, auth tokens, localStorage or IndexedDB.
 
-### Binder
+## 11. Diagnostics, custom providers and signed rules
 
-- [ ] bind succeeds for a third-party test client.
-- [ ] wrong token cannot query provider/account/session data.
-- [ ] correct token can list providers/accounts/session state.
-- [ ] correct token can switch/send/new/stop/attach/navigate.
-- [ ] Binder never returns cookies, website auth tokens, localStorage or IndexedDB.
-
-## 10. Diagnostics and provider rules
-
-- [ ] Provider diagnostics can be viewed/copied.
-- [ ] diagnostics JSON exports through Android document creation.
-- [ ] exported diagnostics contain no AIHub client token.
-- [ ] exported diagnostics contain no cookies/auth/session secrets.
-- [ ] custom AI website can be added and receives a default isolated account/profile.
+- [ ] provider diagnostics can be viewed/copied/exported.
+- [ ] exported diagnostics contain no client token/cookies/auth/session secrets.
+- [ ] custom AI website can be added and gets one deterministic retained provider profile/session.
 - [ ] invalid custom URL is rejected.
-
-## 11. Signed provider-rule update tests
-
-Before production, create a real offline Ed25519 signing key. Never commit the private key.
-
-- [ ] export only the public key into `chromium-overlay/assets/aihub/rules_public_key.txt`.
-- [ ] build a signed bundle with `scripts/build_signed_rule_bundle.py`.
-- [ ] valid signature installs.
-- [ ] invalid signature is rejected.
-- [ ] tampered payload is rejected.
-- [ ] same/older bundle version is rejected.
-- [ ] newer bundle overrides matching provider IDs.
-- [ ] rollback restores the previous valid signed bundle.
-- [ ] changing signing public key does not let an unverified old bundle block recovery with a new valid bundle.
-- [ ] empty public-key asset disables signed-rule installation rather than accepting unsigned content.
+- [ ] valid Ed25519-signed rule bundle installs.
+- [ ] invalid/tampered signature is rejected.
+- [ ] same/older version is rejected.
+- [ ] rollback restores the previous valid bundle.
+- [ ] empty public-key asset disables signed-rule installation instead of accepting unsigned data.
 
 ## 12. Lifecycle/recovery tests
 
 - [ ] rotate device while browsing; external commands are not replayed.
 - [ ] background/foreground active and inactive providers.
-- [ ] swipe AIHub away and reopen; selected provider/account/workspace metadata restores safely.
-- [ ] terminate app process and reopen; persisted WebEngine tabs/login state behave as expected for this Chromium revision.
+- [ ] swipe AIHub away and reopen; selected provider restores safely.
+- [ ] terminate app process and reopen; provider WebEngine state behaves as expected for the revision.
 - [ ] renderer/service crash produces recoverable behavior or actionable logs.
-- [ ] memory pressure with several AI accounts/providers does not make switching unusable.
+- [ ] memory pressure with several provider sessions does not make switching unusable.
 
-## 13. Capture integration result
+## 13. Capture the first verified integration result
 
-For the first successful real build, record:
+Record:
 
 ```text
 Chromium git revision:
@@ -198,8 +176,11 @@ AIHub commit:
 WebEngine support APK/package:
 Built APK path:
 Providers tested:
+OAuth/new-tab flows tested:
+Camera/microphone/location result:
+Download result:
 Known provider rule failures:
 Known WebEngine/runtime failures:
 ```
 
-Only after sections 1–12 have been exercised should the repository describe a specific Chromium revision/device combination as integration-tested.
+Only after these sections are exercised should a specific Chromium revision/device combination be described as integration-tested.
