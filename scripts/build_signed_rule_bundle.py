@@ -31,6 +31,15 @@ def load_rules(paths):
     return rules
 
 
+def run_checked(command, error_message):
+    try:
+        return subprocess.run(command, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace").strip() if exc.stderr else ""
+        detail = f"\nOpenSSL: {stderr}" if stderr else ""
+        raise SystemExit(error_message + detail) from exc
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build and Ed25519-sign an AIHub provider rule bundle")
     parser.add_argument("--version", type=int, required=True)
@@ -39,6 +48,10 @@ def main():
     source.add_argument("--rules-dir", help="Directory containing provider *.json files")
     source.add_argument("--rules", nargs="+", help="Explicit provider JSON files")
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--public-key-output",
+        help="Optional output path for the Android X.509 DER public key encoded as one Base64 line",
+    )
     args = parser.parse_args()
 
     if args.version < 1:
@@ -49,6 +62,14 @@ def main():
     private_key = pathlib.Path(args.private_key).expanduser().resolve()
     if not private_key.is_file():
         raise SystemExit(f"private key not found: {private_key}")
+
+    # Validate the key up front and fail with a useful error before doing any file work.
+    key_info = run_checked(
+        ["openssl", "pkey", "-in", str(private_key), "-text_pub", "-noout"],
+        "Could not read --private-key. Expected an Ed25519 private key in PEM format.",
+    ).stdout.decode("utf-8", errors="replace")
+    if "ED25519" not in key_info.upper():
+        raise SystemExit("--private-key is not an Ed25519 key")
 
     if args.rules:
         paths = [pathlib.Path(item).expanduser().resolve() for item in args.rules]
@@ -79,19 +100,24 @@ def main():
         tmp = pathlib.Path(tmp_name)
         payload_path = tmp / "payload.json"
         signature_path = tmp / "signature.bin"
+        public_der_path = tmp / "public-key.der"
         payload_path.write_bytes(payload)
-        try:
-            subprocess.run([
-                "openssl", "pkeyutl", "-sign", "-rawin",
-                "-inkey", str(private_key),
-                "-in", str(payload_path),
-                "-out", str(signature_path),
-            ], check=True)
-        except subprocess.CalledProcessError as exc:
-            raise SystemExit(
-                "OpenSSL signing failed. Ensure --private-key is an Ed25519 private key in PEM format."
-            ) from exc
+
+        run_checked([
+            "openssl", "pkeyutl", "-sign", "-rawin",
+            "-inkey", str(private_key),
+            "-in", str(payload_path),
+            "-out", str(signature_path),
+        ], "OpenSSL signing failed. Ensure --private-key is an Ed25519 private key in PEM format.")
         signature = signature_path.read_bytes()
+
+        public_key_text = None
+        if args.public_key_output:
+            run_checked([
+                "openssl", "pkey", "-in", str(private_key), "-pubout", "-outform", "DER",
+                "-out", str(public_der_path),
+            ], "Could not derive the Ed25519 public key.")
+            public_key_text = base64.b64encode(public_der_path.read_bytes()).decode("ascii") + "\n"
 
     envelope = {
         "payload": base64.b64encode(payload).decode("ascii"),
@@ -100,6 +126,13 @@ def main():
     output = pathlib.Path(args.output).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+
+    if args.public_key_output and public_key_text is not None:
+        public_output = pathlib.Path(args.public_key_output).expanduser()
+        public_output.parent.mkdir(parents=True, exist_ok=True)
+        public_output.write_text(public_key_text, encoding="ascii")
+        print(f"Android public key: {public_output}")
+
     print(f"signed AIHub rule bundle v{args.version}: {output}")
     print(f"providers: {len(rules)}")
     print("provider ids: " + ", ".join(rule["id"] for rule in rules))
