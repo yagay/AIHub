@@ -2,7 +2,6 @@ package com.yagay.aihub.chromium;
 
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.AiSessionKey;
 import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.runtime.SessionRuntime;
@@ -11,7 +10,10 @@ import java.util.List;
 import java.util.Map;
 import org.chromium.webengine.Tab;
 
-/** Chromium WebEngine-facing runtime; all upstream WebEngine API usage stays in this layer. */
+/**
+ * The entire Chromium-facing session adapter. AIHub core knows nothing about WebEngine APIs.
+ * One fixed WebEngine profile/persistence id is used per AI provider.
+ */
 public final class WebEngineSessionRuntime implements SessionRuntime {
     public interface WebEngineHost {
         ListenableFuture<Tab> openOrRestoreTab(String profileName, String persistenceId, String url);
@@ -31,11 +33,12 @@ public final class WebEngineSessionRuntime implements SessionRuntime {
     public WebEngineSessionRuntime(WebEngineHost host) { this.host = host; }
 
     @Override
-    public void open(AiSessionKey key, ProviderConfig provider, AiAccount account) {
-        String persistenceId = "aihub_" + sanitize(key.providerId()) + "_" + sanitize(key.accountId());
-        ListenableFuture<Tab> future = host.openOrRestoreTab(
-                account.profileName(), persistenceId, provider.homeUrl());
-        holders.put(key, new Holder(account.profileName(), provider, future));
+    public void open(AiSessionKey key, ProviderConfig provider) {
+        String safe = sanitize(provider.id());
+        String profileName = "aihub_provider_" + safe;
+        String persistenceId = "aihub_session_" + safe;
+        ListenableFuture<Tab> future = host.openOrRestoreTab(profileName, persistenceId, provider.homeUrl());
+        holders.put(key, new Holder(profileName, provider, future));
     }
 
     @Override
@@ -61,10 +64,12 @@ public final class WebEngineSessionRuntime implements SessionRuntime {
         Holder h = require(key);
         execute(h, GenericDomScriptFactory.fillAndSend(text, h.provider()));
     }
+
     @Override public void newChat(AiSessionKey key) {
         Holder h = require(key);
         execute(h, GenericDomScriptFactory.newChat(h.provider()));
     }
+
     @Override public void stop(AiSessionKey key) {
         Holder h = require(key);
         execute(h, GenericDomScriptFactory.stop(h.provider()));
@@ -147,5 +152,7 @@ public final class WebEngineSessionRuntime implements SessionRuntime {
         return h;
     }
 
-    private static String sanitize(String value) { return value.replaceAll("[^A-Za-z0-9_]", "_"); }
+    private static String sanitize(String value) {
+        return value.replaceAll("[^A-Za-z0-9_]", "_");
+    }
 }
