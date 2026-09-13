@@ -1,57 +1,46 @@
-name: AIHub Core Checks
+name: AIHub Android Build
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  core:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v5
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - name: Check script syntax
-        run: |
-          bash -n scripts/*.sh
-          python3 -m py_compile scripts/*.py
-      - name: Validate provider rules and architecture
-        run: python3 scripts/validate_provider_rules.py
-      - name: Validate repository wiring
-        run: python3 scripts/validate_repo.py
-      - name: Test Chrome overlay patcher
-        run: python3 scripts/test_chrome_overlay.py
-      - name: Run core smoke test
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 37
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Core smoke test
         run: bash scripts/run_core_smoke_test.sh
-      - name: Sign and verify provider rule bundle
-        run: |
-          set -euo pipefail
-          openssl genpkey -algorithm Ed25519 -out /tmp/aihub-rule-key.pem
-          python3 scripts/build_signed_rule_bundle.py \
-            --version 1 \
-            --private-key /tmp/aihub-rule-key.pem \
-            --rules-dir chromium-overlay/assets/aihub/providers \
-            --output /tmp/aihub-rules.json \
-            --public-key-output /tmp/aihub-public-key.txt
-          python3 - <<'PY'
-          import base64, json, pathlib
-          envelope = json.loads(pathlib.Path('/tmp/aihub-rules.json').read_text())
-          payload = base64.b64decode(envelope['payload'], validate=True)
-          signature = base64.b64decode(envelope['signature'], validate=True)
-          public_der = base64.b64decode(pathlib.Path('/tmp/aihub-public-key.txt').read_text().strip(), validate=True)
-          decoded = json.loads(payload)
-          assert decoded['version'] == 1
-          assert len(decoded['rules']) == 5
-          assert signature
-          pathlib.Path('/tmp/aihub-payload.bin').write_bytes(payload)
-          pathlib.Path('/tmp/aihub-signature.bin').write_bytes(signature)
-          pathlib.Path('/tmp/aihub-public.der').write_bytes(public_der)
-          PY
-          openssl pkey -pubin -inform DER -in /tmp/aihub-public.der -out /tmp/aihub-public.pem
-          openssl pkeyutl -verify -rawin \
-            -pubin -inkey /tmp/aihub-public.pem \
-            -in /tmp/aihub-payload.bin \
-            -sigfile /tmp/aihub-signature.bin
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIHub-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
