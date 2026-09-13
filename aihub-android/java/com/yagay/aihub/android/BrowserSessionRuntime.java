@@ -109,6 +109,11 @@ public final class BrowserSessionRuntime implements SessionRuntime {
         host.evaluateJavaScript(GenericDomScriptFactory.probe(provider(key)), callback);
     }
 
+    /** Applies/removes the app-like DOM transform for the active provider page. */
+    public void setAppMode(AiSessionKey key, boolean enabled) {
+        host.evaluateJavaScript(GenericDomScriptFactory.setAppMode(enabled, provider(key)), null);
+    }
+
     public String currentUrl() { return host.currentUrl(); }
     public boolean isLoading() { return host.isLoading(); }
     public int loadProgress() { return host.loadProgress(); }
