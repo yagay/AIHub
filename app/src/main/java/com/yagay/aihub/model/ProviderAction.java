@@ -6,12 +6,14 @@ import java.util.List;
 public record ProviderAction(
         String id,
         String label,
+        String pick,
         List<String> selectors,
         List<String> keywords) {
 
     public ProviderAction {
         id = id == null ? "" : id.trim();
         label = label == null ? id : label.trim();
+        pick = pick == null || pick.isBlank() ? "first" : pick.trim();
         selectors = List.copyOf(selectors == null ? List.of() : selectors);
         keywords = List.copyOf(keywords == null ? List.of() : keywords);
     }
