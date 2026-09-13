@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NEXTCHAT_COMMIT="defdcdb55d850cd12c4c657eb83729fd66e215c0"
+WORK="$ROOT/.build/nextchat"
+OUT="$ROOT/app/src/main/assets/ui"
+
+rm -rf "$WORK" "$OUT"
+mkdir -p "$ROOT/.build" "$OUT"
+git clone --filter=blob:none --no-checkout https://github.com/ChatGPTNextWeb/NextChat.git "$WORK"
+git -C "$WORK" checkout --detach "$NEXTCHAT_COMMIT"
+python3 "$ROOT/ui/patch_nextchat.py" "$WORK"
+
+pushd "$WORK" >/dev/null
+export HUSKY=0 NEXT_TELEMETRY_DISABLED=1
+corepack enable >/dev/null 2>&1 || true
+corepack prepare yarn@1.22.19 --activate >/dev/null 2>&1 || true
+yarn install --frozen-lockfile --network-timeout 600000
+yarn export
+popd >/dev/null
+
+cp -a "$WORK/out/." "$OUT/"
+cp "$WORK/LICENSE" "$OUT/NEXTCHAT_LICENSE.txt"
+test -f "$OUT/index.html"
+echo "Built NextChat UI from $NEXTCHAT_COMMIT"

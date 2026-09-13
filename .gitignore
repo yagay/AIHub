@@ -1,7 +1,8 @@
-.out/
-out/
-*.apk
-*.aab
-*.class
 .gradle/
+build/
+**/build/
+local.properties
 .idea/
+.build/
+app/src/main/assets/ui/
+app/src/main/assets/titanium-extension/

@@ -9,29 +9,23 @@ val aihubVersionName = providers.gradleProperty("aihubVersionName").orNull
 android {
     namespace = "com.yagay.aihub"
     compileSdk {
-        version = release(37) {
-            minorApiLevel = 1
-        }
+        version = release(37) { minorApiLevel = 1 }
     }
 
     defaultConfig {
         applicationId = "com.yagay.aihub"
         minSdk = 28
         targetSdk = 36
-        versionCode = aihubVersionCode ?: 3
-        versionName = aihubVersionName ?: "0.3.0"
+        versionCode = aihubVersionCode ?: 400
+        versionName = aihubVersionName ?: "0.4.0"
 
         aihubAbi?.takeIf { it.isNotBlank() }?.let { abi ->
-            ndk {
-                abiFilters += abi
-            }
+            ndk { abiFilters += abi }
         }
     }
 
     buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
+        release { isMinifyEnabled = false }
     }
 
     compileOptions {
@@ -42,5 +36,5 @@ android {
 
 dependencies {
     implementation("androidx.activity:activity:1.13.0")
-    implementation("org.mozilla.geckoview:geckoview-nightly:158.0.20260911092915")
+    implementation("androidx.webkit:webkit:1.14.0")
 }

@@ -1,33 +1,48 @@
 package com.yagay.aihub.app;
 
-import android.content.Intent;
 import android.os.Bundle;
-import android.view.View;
+import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 
-import com.yagay.aihub.ui.MainController;
+import com.yagay.aihub.bridge.LocalBroker;
+import com.yagay.aihub.titanium.TitaniumManager;
+import com.yagay.aihub.ui.UiHost;
 
-/** Thin Android lifecycle entry point. All app behavior lives behind MainController. */
+/** Fresh AIHub shell: NextChat UI + localhost IPC + Titanium extension. */
 public final class MainActivity extends ComponentActivity {
-    private MainController controller;
+    private LocalBroker broker;
+    private TitaniumManager titanium;
+    private UiHost ui;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        controller = new MainController(this);
-        View root = controller.screen().root();
-        root.setFitsSystemWindows(true);
-        setContentView(root);
-        controller.start();
-        controller.handleIntent(getIntent());
+        titanium = new TitaniumManager(this);
+        broker = new LocalBroker(titanium::launchProvider);
+        broker.start();
+
+        ui = new UiHost(this);
+        setContentView(ui.view());
+        ui.start();
+
+        titanium.prepareAsync(new TitaniumManager.Callback() {
+            @Override public void onReady() {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Titanium bridge ready", Toast.LENGTH_SHORT).show());
+            }
+
+            @Override public void onError(Throwable error) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Titanium bridge: " + error.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                if (controller != null && controller.handleBack()) return;
+            @Override public void handleOnBackPressed() {
+                if (ui != null && ui.handleBack()) return;
                 setEnabled(false);
                 getOnBackPressedDispatcher().onBackPressed();
                 setEnabled(true);
@@ -36,16 +51,12 @@ public final class MainActivity extends ComponentActivity {
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        if (controller != null) controller.handleIntent(intent);
-    }
-
-    @Override
     protected void onDestroy() {
-        if (controller != null) controller.destroy();
-        controller = null;
+        if (ui != null) ui.destroy();
+        if (broker != null) broker.close();
+        ui = null;
+        broker = null;
+        titanium = null;
         super.onDestroy();
     }
 }
