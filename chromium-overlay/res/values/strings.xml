@@ -1,31 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AIHub</string>
-    <string name="choose_ai">Choose AI</string>
     <string name="add_ai_website">＋ Add AI website</string>
+    <string name="add_ai_short">＋ AI</string>
+    <string name="switch_to_ai">Switch to %1$s</string>
     <string name="ai_name_hint">AI name (for example Perplexity)</string>
     <string name="ai_url_hint">https://example.com</string>
-    <string name="choose_account">Choose account</string>
-    <string name="add_account">＋ Add account</string>
-    <string name="manage_accounts">Manage accounts</string>
-    <string name="rename_account">Rename account</string>
-    <string name="remove_account">Remove account from AIHub</string>
-    <string name="remove_account_warning">This removes the account from AIHub and workspace mappings. It does not claim to erase the underlying WebEngine profile/site data.</string>
-    <string name="account_name_hint">Account name</string>
-    <string name="default_account">Default</string>
-    <string name="previous_ai">Previous AI</string>
-    <string name="next_ai">Next AI</string>
     <string name="new_chat">New chat</string>
     <string name="stop_generation">Stop generation</string>
     <string name="attach">Attach</string>
     <string name="composer_hint">Ask anything…</string>
     <string name="send">Send</string>
+
     <string name="share_confirm_title">Send to AIHub?</string>
     <string name="link_confirm_title">Run AIHub link?</string>
-    <string name="external_confirm_details">Action: %1$s\nAI: %2$s\nAccount: %3$s\nWorkspace: %4$s\n\nContinue only if you trust the source.</string>
+    <string name="external_confirm_details">Action: %1$s\nAI: %2$s\n\nContinue only if you trust the source.</string>
     <string name="external_target_automatic">Automatic</string>
-    <string name="external_target_none">None</string>
-    <string name="external_action_switch">Switch AI/session</string>
+    <string name="external_target_current">Current AI</string>
+    <string name="external_action_switch">Switch AI</string>
     <string name="external_action_send">Send text</string>
     <string name="external_action_attach">Attach file(s)</string>
     <string name="external_action_attach_send">Attach file(s) and send text</string>
@@ -37,18 +29,10 @@
     <string name="external_action_next">Switch to next AI</string>
     <string name="external_action_previous">Switch to previous AI</string>
     <string name="external_request_denied">External AIHub request rejected.</string>
+
     <string name="browser_back">Back</string>
     <string name="browser_forward">Forward</string>
     <string name="browser_reload">Reload</string>
-    <string name="choose_workspace">Choose workspace</string>
-    <string name="no_workspace">No workspace (use accounts individually)</string>
-    <string name="no_workspace_short">No workspace</string>
-    <string name="create_workspace">＋ Create workspace from current accounts</string>
-    <string name="manage_workspaces">Manage workspaces</string>
-    <string name="rename_workspace">Rename workspace</string>
-    <string name="delete_workspace">Delete workspace</string>
-    <string name="workspace_name_hint">Workspace name</string>
-    <string name="workspace_default_name">Workspace</string>
     <string name="tools">Tools</string>
     <string name="provider_diagnostics">Provider diagnostics</string>
     <string name="export_diagnostics">Export diagnostics JSON</string>
@@ -69,4 +53,5 @@
     <string name="current_url">Current URL</string>
     <string name="copy">Copy</string>
     <string name="copied">Copied</string>
+    <string name="operation_failed">Operation failed</string>
 </resources>
