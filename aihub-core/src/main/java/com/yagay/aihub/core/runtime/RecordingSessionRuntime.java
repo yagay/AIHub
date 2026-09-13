@@ -22,6 +22,9 @@ public final class RecordingSessionRuntime implements SessionRuntime {
     @Override public void newChat(AiSessionKey key) { events.add("newChat:" + key); }
     @Override public void stop(AiSessionKey key) { events.add("stop:" + key); }
     @Override public void attach(AiSessionKey key, List<String> uriStrings) { events.add("attach:" + key + ":" + uriStrings.size()); }
+    @Override public void attachAndSend(AiSessionKey key, List<String> uriStrings, String text) {
+        events.add("attachAndSend:" + key + ":" + uriStrings.size() + ":" + text);
+    }
     @Override public void back(AiSessionKey key) { events.add("back:" + key); }
     @Override public void forward(AiSessionKey key) { events.add("forward:" + key); }
     @Override public void reload(AiSessionKey key) { events.add("reload:" + key); }
