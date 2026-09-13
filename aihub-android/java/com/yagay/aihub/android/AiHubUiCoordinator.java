@@ -1,5 +1,6 @@
 package com.yagay.aihub.android;
 
+import android.app.AlertDialog;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
@@ -31,28 +32,52 @@ public final class AiHubUiCoordinator {
 
     private final AiHubBrowserHost host;
     private final ProviderRegistry providers;
+    private final AiHubStateStore stateStore;
     private final BrowserSessionRuntime runtime;
     private final SessionManager sessions;
     private final Map<String, Button> providerButtons = new LinkedHashMap<>();
 
     private FrameLayout overlay;
+    private LinearLayout providerRail;
     private TextView currentProvider;
     private EditText composer;
     private boolean chromeControlsVisible;
 
-    private AiHubUiCoordinator(AiHubBrowserHost host, ProviderRegistry providers) {
+    private AiHubUiCoordinator(
+            AiHubBrowserHost host,
+            ProviderRegistry providers,
+            AiHubStateStore stateStore) {
         this.host = host;
         this.providers = providers;
+        this.stateStore = stateStore;
         this.runtime = new BrowserSessionRuntime(host);
         this.sessions = new SessionManager(providers, runtime);
     }
 
+    /** Normal Chromium entry: generated JSON rules + custom providers + signed overrides. */
+    public static AiHubUiCoordinator attachConfigured(AiHubBrowserHost host) {
+        AiHubStateStore stateStore = new AiHubStateStore(host.activity());
+        ProviderRegistry providers = new ProviderRuleLoader(stateStore).load();
+        return attach(host, providers, stateStore);
+    }
+
+    /** Fallback/testing entry that needs no generated build rule class. */
     public static AiHubUiCoordinator attachDefault(AiHubBrowserHost host) {
-        return attach(host, BuiltinProviders.createDefaultRegistry());
+        return attach(
+                host,
+                BuiltinProviders.createDefaultRegistry(),
+                new AiHubStateStore(host.activity()));
     }
 
     public static AiHubUiCoordinator attach(AiHubBrowserHost host, ProviderRegistry providers) {
-        AiHubUiCoordinator coordinator = new AiHubUiCoordinator(host, providers);
+        return attach(host, providers, new AiHubStateStore(host.activity()));
+    }
+
+    private static AiHubUiCoordinator attach(
+            AiHubBrowserHost host,
+            ProviderRegistry providers,
+            AiHubStateStore stateStore) {
+        AiHubUiCoordinator coordinator = new AiHubUiCoordinator(host, providers, stateStore);
         coordinator.attach();
         return coordinator;
     }
@@ -93,7 +118,8 @@ public final class AiHubUiCoordinator {
         showChromeControls(false);
 
         if (!providers.all().isEmpty()) {
-            activate(providers.all().get(0).id());
+            String saved = stateStore.savedProviderId();
+            activate(saved != null && providers.contains(saved) ? saved : providers.all().get(0).id());
         }
     }
 
@@ -123,20 +149,19 @@ public final class AiHubUiCoordinator {
 
         HorizontalScrollView scroll = new HorizontalScrollView(host.activity());
         scroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout rail = new LinearLayout(host.activity());
-        rail.setOrientation(LinearLayout.HORIZONTAL);
-        rail.setGravity(Gravity.CENTER_VERTICAL);
-        scroll.addView(rail, new HorizontalScrollView.LayoutParams(
+        providerRail = new LinearLayout(host.activity());
+        providerRail.setOrientation(LinearLayout.HORIZONTAL);
+        providerRail.setGravity(Gravity.CENTER_VERTICAL);
+        scroll.addView(providerRail, new HorizontalScrollView.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        for (ProviderConfig provider : providers.all()) {
-            Button item = button(provider.displayName(), ignored -> activate(provider.id()));
-            item.setAllCaps(false);
-            providerButtons.put(provider.id(), item);
-            rail.addView(item, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
-        }
+        for (ProviderConfig provider : providers.all()) addProviderButton(provider);
+        Button addAi = button("＋ AI", ignored -> showAddAiDialog());
+        addAi.setAllCaps(false);
+        providerRail.addView(addAi, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
+
         top.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
@@ -180,9 +205,65 @@ public final class AiHubUiCoordinator {
         overlay.addView(bar, params);
     }
 
+    private void addProviderButton(ProviderConfig provider) {
+        if (providerButtons.containsKey(provider.id())) return;
+        Button item = button(provider.displayName(), ignored -> activate(provider.id()));
+        item.setAllCaps(false);
+        providerButtons.put(provider.id(), item);
+        // Keep the Add AI button last when adding a custom provider after initial construction.
+        int index = providerRail.getChildCount();
+        if (index > 0 && "＋ AI".contentEquals(((Button) providerRail.getChildAt(index - 1)).getText())) {
+            index--;
+        }
+        providerRail.addView(item, index, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)));
+    }
+
+    private void showAddAiDialog() {
+        LinearLayout form = new LinearLayout(host.activity());
+        form.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        form.setPadding(pad, dp(8), pad, 0);
+
+        EditText name = new EditText(host.activity());
+        name.setHint("AI name");
+        form.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        EditText url = new EditText(host.activity());
+        url.setHint("https://example.com/");
+        url.setSingleLine(true);
+        form.addView(url, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        AlertDialog dialog = new AlertDialog.Builder(host.activity())
+                .setTitle("Add AI website")
+                .setView(form)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Add", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(button -> {
+                    try {
+                        ProviderConfig provider = CustomProviderFactory.create(
+                                providers,
+                                stateStore,
+                                name.getText().toString(),
+                                url.getText().toString());
+                        addProviderButton(provider);
+                        activate(provider.id());
+                        dialog.dismiss();
+                    } catch (RuntimeException error) {
+                        url.setError(error.getMessage() == null ? "Invalid AI website" : error.getMessage());
+                    }
+                }));
+        dialog.show();
+    }
+
     private void activate(String providerId) {
         ProviderConfig provider = providers.require(providerId);
         sessions.switchProvider(providerId);
+        stateStore.saveCurrent(sessions.currentKey());
         currentProvider.setText(provider.displayName());
         for (Map.Entry<String, Button> entry : providerButtons.entrySet()) {
             entry.getValue().setSelected(entry.getKey().equals(providerId));
