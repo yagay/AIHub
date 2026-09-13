@@ -14,9 +14,9 @@ public final class AiCommandBus {
         if (command == null) return CommandResult.error("command is null");
         try {
             switch (command.type()) {
-                case SWITCH -> selectTarget(command, true);
+                case SWITCH -> selectTarget(AiCommandTarget.from(command), true);
                 case SEND_TEXT -> {
-                    selectTarget(command, false);
+                    selectTarget(AiCommandTarget.from(command), false);
                     sessions.sendText(command.text());
                 }
                 case NEW_CHAT -> sessions.newChat();
@@ -35,40 +35,19 @@ public final class AiCommandBus {
         }
     }
 
-    /**
-     * Target-selection semantics are shared by SWITCH and SEND_TEXT:
-     *
-     * 1. explicit account -> use that exact account and leave workspace mode;
-     * 2. explicit workspace -> use its mapping, optionally for an explicit provider;
-     * 3. provider only -> switch provider while preserving the active workspace;
-     * 4. no target -> stay on the current session.
-     */
-    private void selectTarget(AiCommand command, boolean requireTargetForSwitch) {
-        String provider = clean(command.providerId());
-        String account = clean(command.accountId());
-        String workspace = clean(command.workspaceId());
-
-        if (account != null) {
-            sessions.switchAccount(provider, account);
-            return;
+    private void selectTarget(AiCommandTarget target, boolean requireTargetForSwitch) {
+        switch (target.mode()) {
+            case EXPLICIT_ACCOUNT -> sessions.switchAccount(target.providerId(), target.accountId());
+            case EXPLICIT_WORKSPACE -> {
+                if (target.providerId() == null) sessions.switchWorkspace(target.workspaceId());
+                else sessions.switchWorkspace(target.workspaceId(), target.providerId());
+            }
+            case PROVIDER -> sessions.switchProvider(target.providerId());
+            case CURRENT -> {
+                if (requireTargetForSwitch) {
+                    throw new IllegalArgumentException("SWITCH requires providerId, accountId or workspaceId");
+                }
+            }
         }
-        if (workspace != null) {
-            if (provider == null) sessions.switchWorkspace(workspace);
-            else sessions.switchWorkspace(workspace, provider);
-            return;
-        }
-        if (provider != null) {
-            sessions.switchProvider(provider);
-            return;
-        }
-        if (requireTargetForSwitch) {
-            throw new IllegalArgumentException("SWITCH requires providerId, accountId or workspaceId");
-        }
-    }
-
-    private static String clean(String value) {
-        if (value == null) return null;
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 }
