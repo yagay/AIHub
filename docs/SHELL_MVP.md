@@ -24,9 +24,9 @@ AIHub now has a unified Android/WebEngine shell source layer with provider switc
 
 `AiHubEntryActivity` is the only exported Activity. `AiHubShellActivity` is intentionally unexported.
 
-Ordinary Android shares require a user confirmation dialog before the content reaches the logged-in AI session. Automatic custom Intent/deep-link/Binder actions require the local client token shown in AIHub Tools.
+Ordinary Android shares require a user confirmation dialog before the content reaches the logged-in AI session. Deep links are also user-confirmed and intentionally contain no reusable client secret. Unattended custom Intent/Binder actions require the local client token shown in AIHub Tools.
 
-Switch provider:
+Switch provider automatically with a token-gated Intent:
 
 ```bash
 adb shell am start \
@@ -36,7 +36,7 @@ adb shell am start \
   --es client_token YOUR_TOKEN
 ```
 
-Send text:
+Send text automatically:
 
 ```bash
 adb shell am start \
@@ -46,10 +46,10 @@ adb shell am start \
   --es client_token YOUR_TOKEN
 ```
 
-Deep link:
+User-confirmed deep link:
 
 ```text
-aihub://send?provider=gemini&text=hello&token=YOUR_TOKEN
+aihub://send?provider=gemini&text=hello
 ```
 
 The external API never returns WebEngine cookies, login tokens, localStorage or IndexedDB.
