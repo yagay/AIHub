@@ -7,7 +7,7 @@ Why:
 - Chromium's Android Chrome UI still has explicit single-regular-profile assumptions.
 - WebEngine is Chromium's browser-embedding layer, intended for applications that provide their own UI.
 - Its Tab API supports active-tab switching and JavaScript execution, which maps well to a unified AI composer.
-- `WebEngineParams` has a profile name/persistence model that can be used as the isolation boundary for account containers.
+- `FragmentParams` has a profile name/persistence model that can be used as the isolation boundary for account containers.
 
 ## Recommended upstream checkout
 
@@ -46,3 +46,16 @@ The WebEngine API is still under development, so keep all direct `org.chromium.w
 ## Important restriction
 
 Do not copy WebEngine implementation classes into the app. Build against the public WebEngine API in the Chromium checkout. The API is evolving, so the host adapter is intentionally a small seam.
+
+## AIHub GN shell target
+
+The repository now includes `chromium-overlay/BUILD.gn` and an Android manifest/resources/activity shell.
+When the repository is placed at `src/aihub` in a Chromium checkout, the intended target is:
+
+```bash
+autoninja -C out/Default //aihub/chromium-overlay:aihub_apk
+```
+
+All code that directly imports `org.chromium.webengine.*` stays in `chromium-overlay/`. If a Chromium revision
+renames or changes the WebEngine API, only this layer should need adaptation; `aihub-core` and the third-party
+command contract remain unchanged.
