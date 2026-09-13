@@ -7,9 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Single switching entry point for provider switching, account switching and workspace switching.
- */
+/** Single switching entry point for provider, account and workspace switching. */
 public final class SessionManager {
     private final ProviderRegistry providers;
     private final AccountRegistry accounts;
@@ -18,6 +16,7 @@ public final class SessionManager {
     private final Map<AiSessionKey, AiSession> sessions = new LinkedHashMap<>();
     private final Map<String, String> lastAccountByProvider = new LinkedHashMap<>();
     private AiSessionKey current;
+    private String activeWorkspaceId;
 
     public SessionManager(
             ProviderRegistry providers,
@@ -48,6 +47,7 @@ public final class SessionManager {
         session.setState(SessionState.READY);
         current = key;
         lastAccountByProvider.put(key.providerId(), key.accountId());
+        if (workspaceId != null && !workspaceId.isBlank()) activeWorkspaceId = workspaceId;
         return session;
     }
 
@@ -56,31 +56,42 @@ public final class SessionManager {
         return sessions.get(current);
     }
 
-    public synchronized AiSessionKey currentKey() {
-        return current().key();
+    public synchronized AiSession currentOrNull() {
+        return current == null ? null : sessions.get(current);
+    }
+
+    public synchronized AiSessionKey currentKey() { return current().key(); }
+    public synchronized String activeWorkspaceId() { return activeWorkspaceId; }
+
+    public synchronized String preferredAccountId(String providerId) {
+        providers.require(providerId);
+        String id = lastAccountByProvider.get(providerId);
+        if (id != null && accounts.contains(id)) return id;
+        List<AiAccount> candidates = accounts.forProvider(providerId);
+        if (candidates.isEmpty()) throw new IllegalStateException("No account registered for provider: " + providerId);
+        return candidates.get(0).id();
     }
 
     public synchronized AiSession switchProvider(String providerId) {
-        return activate(providerId, null, null);
+        return activate(providerId, null, activeWorkspaceId);
     }
 
     public synchronized AiSession switchAccount(String accountId) {
         AiAccount account = accounts.require(accountId);
+        activeWorkspaceId = null;
         return activate(account.providerId(), account.id(), null);
     }
 
     public synchronized AiSession switchWorkspace(String workspaceId) {
         String providerId = current != null ? current.providerId() : firstProviderId();
+        workspaces.require(workspaceId);
+        activeWorkspaceId = workspaceId;
         return activate(providerId, null, workspaceId);
     }
 
-    public synchronized AiSession nextProvider() {
-        return moveProvider(1);
-    }
-
-    public synchronized AiSession previousProvider() {
-        return moveProvider(-1);
-    }
+    public synchronized void clearWorkspace() { activeWorkspaceId = null; }
+    public synchronized AiSession nextProvider() { return moveProvider(1); }
+    public synchronized AiSession previousProvider() { return moveProvider(-1); }
 
     public synchronized void sendText(String text) {
         if (text == null || text.isBlank()) return;
@@ -89,11 +100,21 @@ public final class SessionManager {
 
     public synchronized void newChat() { runtime.newChat(currentKey()); }
     public synchronized void stop() { runtime.stop(currentKey()); }
-    public synchronized void attach(List<String> uris) { runtime.attach(currentKey(), List.copyOf(uris)); }
-
-    public synchronized Map<AiSessionKey, AiSession> snapshot() {
-        return Map.copyOf(sessions);
+    public synchronized void attach(List<String> uris) {
+        runtime.attach(currentKey(), List.copyOf(uris == null ? List.of() : uris));
     }
+    public synchronized void back() { runtime.back(currentKey()); }
+    public synchronized void forward() { runtime.forward(currentKey()); }
+    public synchronized void reload() { runtime.reload(currentKey()); }
+
+    public synchronized void closeCurrent() {
+        AiSessionKey key = currentKey();
+        runtime.close(key);
+        sessions.remove(key);
+        current = null;
+    }
+
+    public synchronized Map<AiSessionKey, AiSession> snapshot() { return Map.copyOf(sessions); }
 
     private AiSession moveProvider(int delta) {
         List<ProviderConfig> all = providers.all();
@@ -104,14 +125,12 @@ public final class SessionManager {
             if (all.get(i).id().equals(now)) { index = i; break; }
         }
         int next = Math.floorMod(index + delta, all.size());
-        return activate(all.get(next).id(), null, null);
+        return activate(all.get(next).id(), null, activeWorkspaceId);
     }
 
     private AiSessionKey resolve(String providerId, String accountId, String workspaceId) {
         String p = providerId;
-        if (p == null || p.isBlank()) {
-            p = current != null ? current.providerId() : firstProviderId();
-        }
+        if (p == null || p.isBlank()) p = current != null ? current.providerId() : firstProviderId();
         providers.require(p);
 
         String a = accountId;
@@ -119,13 +138,7 @@ public final class SessionManager {
             a = workspaces.require(workspaceId).accountFor(p);
         }
         if (a == null || a.isBlank()) a = lastAccountByProvider.get(p);
-        if (a == null || a.isBlank()) {
-            List<AiAccount> candidates = accounts.forProvider(p);
-            if (candidates.isEmpty()) {
-                throw new IllegalStateException("No account registered for provider: " + p);
-            }
-            a = candidates.get(0).id();
-        }
+        if (a == null || a.isBlank()) a = preferredAccountId(p);
         return new AiSessionKey(p, a);
     }
 

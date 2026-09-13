@@ -1,10 +1,10 @@
 package com.yagay.aihub.chromium;
 
-import android.content.Intent;
-import android.os.Bundle;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
@@ -15,25 +15,30 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
 import com.yagay.aihub.R;
 import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.AiSessionKey;
+import com.yagay.aihub.core.AiWorkspace;
 import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.CommandResult;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
-/**
- * Unified AI shell. Provider switching, account switching and third-party commands all end up in
- * the same SessionManager/AiCommandBus path.
- */
+/** Unified AI shell: every provider/account/action shares one SessionManager/AiCommandBus path. */
 public final class AiHubShellActivity extends AppCompatActivity {
     private AiHubStateStore stateStore;
     private AiHubBootstrap.Graph graph;
+    private WebEngineSessionRuntime runtime;
 
     private Button providerButton;
     private Button accountButton;
+    private Button workspaceButton;
     private EditText composer;
 
     @Override
@@ -43,10 +48,9 @@ public final class AiHubShellActivity extends AppCompatActivity {
 
         stateStore = new AiHubStateStore(this);
         AiWebEngineHost host = new AiWebEngineHost(
-                this,
-                getSupportFragmentManager(),
-                R.id.web_container);
-        graph = AiHubBootstrap.create(stateStore, new WebEngineSessionRuntime(host));
+                this, getSupportFragmentManager(), R.id.web_container);
+        runtime = new WebEngineSessionRuntime(host);
+        graph = AiHubBootstrap.create(this, stateStore, runtime);
 
         bindViews();
         activateInitialSession();
@@ -63,8 +67,12 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private void bindViews() {
         providerButton = findViewById(R.id.provider_button);
         accountButton = findViewById(R.id.account_button);
+        workspaceButton = findViewById(R.id.workspace_button);
         composer = findViewById(R.id.composer);
 
+        findViewById(R.id.browser_back).setOnClickListener(v -> graph.sessions.back());
+        findViewById(R.id.browser_forward).setOnClickListener(v -> graph.sessions.forward());
+        findViewById(R.id.browser_reload).setOnClickListener(v -> graph.sessions.reload());
         findViewById(R.id.previous_provider).setOnClickListener(v -> {
             graph.sessions.previousProvider();
             onSessionChanged();
@@ -75,13 +83,12 @@ public final class AiHubShellActivity extends AppCompatActivity {
         });
         providerButton.setOnClickListener(v -> showProviderPicker());
         accountButton.setOnClickListener(v -> showAccountPicker());
-        accountButton.setOnLongClickListener(v -> {
-            showIntegrationToken();
-            return true;
-        });
+        workspaceButton.setOnClickListener(v -> showWorkspacePicker());
         findViewById(R.id.new_chat_button).setOnClickListener(v -> graph.sessions.newChat());
+        findViewById(R.id.attach_button).setOnClickListener(v -> graph.sessions.attach(List.of()));
         findViewById(R.id.stop_button).setOnClickListener(v -> graph.sessions.stop());
         findViewById(R.id.send_button).setOnClickListener(v -> sendComposer());
+        findViewById(R.id.menu_button).setOnClickListener(v -> showToolsMenu());
 
         composer.setSingleLine(false);
         composer.setImeOptions(EditorInfo.IME_ACTION_SEND);
@@ -100,22 +107,27 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private void activateInitialSession() {
         String provider = stateStore.savedProviderId();
         String account = stateStore.savedAccountId();
+        String workspace = stateStore.savedWorkspaceId();
         try {
-            if (provider != null && account != null
+            if (workspace != null && graph.workspaces.contains(workspace)) {
+                graph.sessions.activate(provider, null, workspace);
+            } else if (provider != null && account != null
                     && graph.providers.contains(provider)
                     && graph.accounts.contains(account)) {
                 graph.sessions.activate(provider, account, null);
             } else {
-                ProviderConfig first = graph.providers.all().get(0);
-                AiAccount firstAccount = graph.accounts.forProvider(first.id()).get(0);
-                graph.sessions.activate(first.id(), firstAccount.id(), null);
+                activateFirstSession();
             }
         } catch (RuntimeException error) {
-            ProviderConfig first = graph.providers.all().get(0);
-            AiAccount firstAccount = graph.accounts.forProvider(first.id()).get(0);
-            graph.sessions.activate(first.id(), firstAccount.id(), null);
+            activateFirstSession();
         }
         onSessionChanged();
+    }
+
+    private void activateFirstSession() {
+        ProviderConfig first = graph.providers.all().get(0);
+        AiAccount firstAccount = graph.accounts.forProvider(first.id()).get(0);
+        graph.sessions.activate(first.id(), firstAccount.id(), null);
     }
 
     private void sendComposer() {
@@ -128,14 +140,8 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private void showProviderPicker() {
         List<ProviderConfig> providers = graph.providers.all();
         String[] labels = providers.stream().map(ProviderConfig::displayName).toArray(String[]::new);
-        AiSessionKey current = graph.sessions.currentKey();
-        int checked = 0;
-        for (int i = 0; i < providers.size(); i++) {
-            if (providers.get(i).id().equals(current.providerId())) {
-                checked = i;
-                break;
-            }
-        }
+        String currentId = graph.sessions.currentKey().providerId();
+        int checked = indexOfProvider(providers, currentId);
         new AlertDialog.Builder(this)
                 .setTitle(R.string.choose_ai)
                 .setSingleChoiceItems(labels, checked, (dialog, which) -> {
@@ -156,13 +162,29 @@ public final class AiHubShellActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.choose_account)
                 .setItems(labels, (dialog, which) -> {
-                    if (which == accounts.size()) showAddAccountDialog(providerId);
-                    else {
-                        graph.sessions.switchAccount(accounts.get(which).id());
-                        onSessionChanged();
+                    if (which == accounts.size()) {
+                        showAddAccountDialog(providerId);
+                    } else {
+                        selectAccount(accounts.get(which));
                     }
                 })
                 .show();
+    }
+
+    private void selectAccount(AiAccount account) {
+        String workspaceId = graph.sessions.activeWorkspaceId();
+        if (workspaceId == null) {
+            graph.sessions.switchAccount(account.id());
+        } else {
+            AiWorkspace old = graph.workspaces.require(workspaceId);
+            Map<String, String> mapping = new LinkedHashMap<>(old.providerAccounts());
+            mapping.put(account.providerId(), account.id());
+            AiWorkspace updated = new AiWorkspace(old.id(), old.label(), mapping);
+            graph.workspaces.register(updated);
+            stateStore.saveWorkspaces(graph.workspaces.all());
+            graph.sessions.switchWorkspace(workspaceId);
+        }
+        onSessionChanged();
     }
 
     private void showAddAccountDialog(String providerId) {
@@ -174,13 +196,151 @@ public final class AiHubShellActivity extends AppCompatActivity {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     AiAccount account = AiHubBootstrap.addAccount(
-                            graph.providers,
-                            graph.accounts,
-                            stateStore,
-                            providerId,
-                            label.getText().toString());
-                    graph.sessions.activate(providerId, account.id(), null);
+                            graph.providers, graph.accounts, stateStore,
+                            providerId, label.getText().toString());
+                    selectAccount(account);
+                })
+                .show();
+    }
+
+    private void showWorkspacePicker() {
+        List<AiWorkspace> workspaces = graph.workspaces.all();
+        String[] labels = new String[workspaces.size() + 2];
+        labels[0] = getString(R.string.no_workspace);
+        for (int i = 0; i < workspaces.size(); i++) labels[i + 1] = workspaces.get(i).label();
+        labels[labels.length - 1] = getString(R.string.create_workspace);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.choose_workspace)
+                .setItems(labels, (dialog, which) -> {
+                    if (which == 0) {
+                        graph.sessions.clearWorkspace();
+                        stateStore.saveWorkspaceId(null);
+                        onSessionChanged();
+                    } else if (which == labels.length - 1) {
+                        showCreateWorkspaceDialog();
+                    } else {
+                        graph.sessions.switchWorkspace(workspaces.get(which - 1).id());
+                        onSessionChanged();
+                    }
+                })
+                .show();
+    }
+
+    private void showCreateWorkspaceDialog() {
+        EditText label = new EditText(this);
+        label.setHint(R.string.workspace_name_hint);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.create_workspace)
+                .setView(label)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    String name = label.getText().toString().trim();
+                    if (name.isEmpty()) name = getString(R.string.workspace_default_name);
+                    Map<String, String> mapping = new LinkedHashMap<>();
+                    for (ProviderConfig provider : graph.providers.all()) {
+                        mapping.put(provider.id(), graph.sessions.preferredAccountId(provider.id()));
+                    }
+                    String id = "workspace:" + UUID.randomUUID().toString().replace("-", "");
+                    AiWorkspace workspace = new AiWorkspace(id, name, mapping);
+                    graph.workspaces.register(workspace);
+                    stateStore.saveWorkspaces(graph.workspaces.all());
+                    graph.sessions.switchWorkspace(id);
                     onSessionChanged();
+                })
+                .show();
+    }
+
+    private void showToolsMenu() {
+        String[] items = {
+                getString(R.string.provider_diagnostics),
+                getString(R.string.integration_token),
+                getString(R.string.rotate_token),
+                getString(R.string.rule_warnings),
+                getString(R.string.current_url)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.tools)
+                .setItems(items, (dialog, which) -> {
+                    switch (which) {
+                        case 0 -> showProviderDiagnostics();
+                        case 1 -> showIntegrationToken(false);
+                        case 2 -> confirmRotateToken();
+                        case 3 -> showRuleWarnings();
+                        case 4 -> showCurrentUrl();
+                        default -> { }
+                    }
+                })
+                .show();
+    }
+
+    private void showProviderDiagnostics() {
+        Futures.addCallback(
+                runtime.probe(graph.sessions.currentKey()),
+                new FutureCallback<>() {
+                    @Override public void onSuccess(String result) {
+                        new AlertDialog.Builder(AiHubShellActivity.this)
+                                .setTitle(R.string.provider_diagnostics)
+                                .setMessage(result == null ? "{}" : result)
+                                .setPositiveButton(android.R.string.ok, null)
+                                .show();
+                    }
+                    @Override public void onFailure(Throwable error) {
+                        Toast.makeText(AiHubShellActivity.this,
+                                error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage(),
+                                Toast.LENGTH_LONG).show();
+                    }
+                },
+                getMainExecutor());
+    }
+
+    private void showCurrentUrl() {
+        Futures.addCallback(
+                runtime.currentUrl(graph.sessions.currentKey()),
+                new FutureCallback<>() {
+                    @Override public void onSuccess(String url) { showCopyDialog(getString(R.string.current_url), url); }
+                    @Override public void onFailure(Throwable error) { }
+                },
+                getMainExecutor());
+    }
+
+    private void showIntegrationToken(boolean rotated) {
+        String token = stateStore.clientToken();
+        showCopyDialog(rotated ? getString(R.string.token_rotated) : getString(R.string.integration_token), token);
+    }
+
+    private void confirmRotateToken() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rotate_token)
+                .setMessage(R.string.rotate_token_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    stateStore.rotateClientToken();
+                    showIntegrationToken(true);
+                })
+                .show();
+    }
+
+    private void showRuleWarnings() {
+        String message = graph.providerWarnings.isEmpty()
+                ? getString(R.string.no_rule_warnings)
+                : String.join("\n", graph.providerWarnings);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rule_warnings)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    private void showCopyDialog(String title, String value) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(value == null ? "" : value)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.copy, (dialog, which) -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    clipboard.setPrimaryClip(ClipData.newPlainText(title, value == null ? "" : value));
+                    Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show();
                 })
                 .show();
     }
@@ -196,26 +356,22 @@ public final class AiHubShellActivity extends AppCompatActivity {
         onSessionChanged();
     }
 
-    private void showIntegrationToken() {
-        String token = stateStore.clientToken();
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.integration_token)
-                .setMessage(token)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.copy, (dialog, which) -> {
-                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                    clipboard.setPrimaryClip(ClipData.newPlainText("AIHub client token", token));
-                    Toast.makeText(this, R.string.token_copied, Toast.LENGTH_SHORT).show();
-                })
-                .show();
-    }
-
     private void onSessionChanged() {
         AiSessionKey key = graph.sessions.currentKey();
         ProviderConfig provider = graph.providers.require(key.providerId());
         AiAccount account = graph.accounts.require(key.accountId());
         providerButton.setText(provider.displayName());
         accountButton.setText(account.label());
+        String workspaceId = graph.sessions.activeWorkspaceId();
+        workspaceButton.setText(workspaceId == null
+                ? getString(R.string.no_workspace_short)
+                : graph.workspaces.require(workspaceId).label());
         stateStore.saveCurrent(key);
+        stateStore.saveWorkspaceId(workspaceId);
+    }
+
+    private static int indexOfProvider(List<ProviderConfig> providers, String id) {
+        for (int i = 0; i < providers.size(); i++) if (providers.get(i).id().equals(id)) return i;
+        return -1;
     }
 }

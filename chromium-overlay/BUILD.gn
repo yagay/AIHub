@@ -1,13 +1,30 @@
-# AIHub overlay target for a Chromium checkout.
-# Copy this repository to //aihub in Chromium, then build //aihub/chromium-overlay:aihub_apk.
-
+# AIHub target for a Chromium checkout. Place this repository at //aihub.
 import("//build/config/android/rules.gni")
 
+android_aidl("aihub_aidl") {
+  import_include = [ "../android-api/src/main/aidl" ]
+  sources = [ "../android-api/src/main/aidl/com/yagay/aihub/api/IAiHubService.aidl" ]
+}
+
 android_resources("aihub_resources") {
-  sources = [
-    "res/layout/aihub_activity_main.xml",
-    "res/values/strings.xml",
-    "res/values/styles.xml",
+  resource_dirs = [ "res" ]
+  custom_package = "com.yagay.aihub"
+}
+
+android_assets("aihub_assets") {
+  renaming_sources = [
+    "assets/aihub/providers/chatgpt.json",
+    "assets/aihub/providers/claude.json",
+    "assets/aihub/providers/gemini.json",
+    "assets/aihub/providers/grok.json",
+    "assets/aihub/providers/deepseek.json",
+  ]
+  renaming_destinations = [
+    "aihub/providers/chatgpt.json",
+    "aihub/providers/claude.json",
+    "aihub/providers/gemini.json",
+    "aihub/providers/grok.json",
+    "aihub/providers/deepseek.json",
   ]
 }
 
@@ -37,24 +54,25 @@ android_library("aihub_core_java") {
 android_library("aihub_java") {
   resources_package = "com.yagay.aihub"
   sources = [
+    "java/com/yagay/aihub/chromium/AiHubBinderService.java",
     "java/com/yagay/aihub/chromium/AiHubBootstrap.java",
     "java/com/yagay/aihub/chromium/AiHubExternalCommandParser.java",
     "java/com/yagay/aihub/chromium/AiHubShellActivity.java",
     "java/com/yagay/aihub/chromium/AiHubStateStore.java",
     "java/com/yagay/aihub/chromium/AiWebEngineHost.java",
     "java/com/yagay/aihub/chromium/GenericDomScriptFactory.java",
+    "java/com/yagay/aihub/chromium/ProviderRuleLoader.java",
     "java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
   ]
   deps = [
+    ":aihub_aidl",
     ":aihub_core_java",
     ":aihub_resources",
     "//third_party/android_deps:com_google_guava_listenablefuture_java",
     "//third_party/android_deps:guava_android_java",
     "//third_party/androidx:androidx_appcompat_appcompat_java",
     "//third_party/androidx:androidx_fragment_fragment_java",
-    "//weblayer/public/java:service_provider_java",
     "//weblayer/public/java:webengine_java",
-    "//weblayer/shell/android:webengine_service_provider_resources",
   ]
 }
 
@@ -63,5 +81,9 @@ android_apk("aihub_apk") {
   android_manifest = "AndroidManifest.xml"
   min_sdk_version = 31
   target_sdk_version = 37
-  deps = [ ":aihub_java" ]
+  deps = [
+    ":aihub_assets",
+    ":aihub_java",
+    "//weblayer/shell/android:webengine_service_provider_resources",
+  ]
 }

@@ -11,6 +11,7 @@ public final class AiCommandBus {
     }
 
     public synchronized CommandResult execute(AiCommand command) {
+        if (command == null) return CommandResult.error("command is null");
         try {
             switch (command.type()) {
                 case SWITCH -> sessions.activate(
@@ -24,6 +25,9 @@ public final class AiCommandBus {
                 case NEW_CHAT -> sessions.newChat();
                 case STOP -> sessions.stop();
                 case ATTACH -> sessions.attach(command.attachments());
+                case BACK -> sessions.back();
+                case FORWARD -> sessions.forward();
+                case RELOAD -> sessions.reload();
                 case NEXT_PROVIDER -> sessions.nextProvider();
                 case PREVIOUS_PROVIDER -> sessions.previousProvider();
             }

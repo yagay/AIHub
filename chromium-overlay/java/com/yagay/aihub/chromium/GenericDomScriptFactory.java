@@ -82,6 +82,60 @@ public final class GenericDomScriptFactory {
         return clickAction(provider.stopSelectors(), List.of("stop", "停止", "停止生成"), "stop");
     }
 
+    /** Finds the site's own attachment/file control and activates it. */
+    public static String findAttachmentControl() {
+        return """
+            (() => {
+              const visible = el => !!el && !el.disabled && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+              const direct = [...document.querySelectorAll('input[type="file"]')].find(el => !el.disabled);
+              if (direct) { direct.click(); return JSON.stringify({ok:true,method:'file-input'}); }
+              const words = ['attach','upload','add file','file','附件','上传','添加文件'];
+              for (const el of document.querySelectorAll('button,[role="button"],a')) {
+                if (!visible(el)) continue;
+                const t = [el.getAttribute('aria-label'), el.getAttribute('title'), el.textContent]
+                  .filter(Boolean).join(' ').toLowerCase();
+                if (words.some(w => t.includes(w))) { el.click(); return JSON.stringify({ok:true,method:'semantic'}); }
+              }
+              return JSON.stringify({ok:false,action:'attach'});
+            })()
+            """;
+    }
+
+    /** Returns a small JSON health report used by diagnostics after providers change their DOM. */
+    public static String probe(ProviderConfig provider) {
+        return """
+            (() => {
+              const inputFallbacks = %s;
+              const sendFallbacks = %s;
+              const newChatFallbacks = %s;
+              const stopFallbacks = %s;
+              const visible = el => !!el && !el.disabled && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+              const any = selectors => selectors.some(s => { try { return visible(document.querySelector(s)); } catch (_) { return false; } });
+              const semantic = words => [...document.querySelectorAll('button,[role="button"],a')].some(el => {
+                if (!visible(el)) return false;
+                const t = [el.getAttribute('aria-label'),el.getAttribute('title'),el.textContent].filter(Boolean).join(' ').toLowerCase();
+                return words.some(w => t.includes(w));
+              });
+              const inputs = [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].filter(visible);
+              const fileInputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled);
+              return JSON.stringify({
+                ok: inputs.length > 0 || any(inputFallbacks),
+                url: location.href,
+                title: document.title,
+                input: inputs.length > 0 || any(inputFallbacks),
+                send: semantic(['send','submit','发送','提交','ask','go']) || any(sendFallbacks),
+                newChat: semantic(['new chat','new conversation','新对话','新聊天']) || any(newChatFallbacks),
+                stop: semantic(['stop','停止','停止生成']) || any(stopFallbacks),
+                file: fileInputs.length > 0
+              });
+            })()
+            """.formatted(
+                    jsArray(provider.inputSelectors()),
+                    jsArray(provider.sendSelectors()),
+                    jsArray(provider.newChatSelectors()),
+                    jsArray(provider.stopSelectors()));
+    }
+
     private static String clickAction(List<String> fallbackSelectors, List<String> words, String action) {
         return """
             (() => {

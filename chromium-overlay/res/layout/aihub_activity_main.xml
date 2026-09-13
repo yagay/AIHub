@@ -9,43 +9,49 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="6dp">
+        android:paddingHorizontal="6dp"
+        android:paddingTop="4dp">
 
-        <Button
-            android:id="@+id/previous_provider"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/previous_ai"
-            android:text="‹" />
+        <Button android:id="@+id/browser_back" android:layout_width="44dp" android:layout_height="44dp" android:contentDescription="@string/browser_back" android:text="‹" />
+        <Button android:id="@+id/browser_forward" android:layout_width="44dp" android:layout_height="44dp" android:contentDescription="@string/browser_forward" android:text="›" />
+        <Button android:id="@+id/browser_reload" android:layout_width="44dp" android:layout_height="44dp" android:contentDescription="@string/browser_reload" android:text="↻" />
 
         <Button
             android:id="@+id/provider_button"
             android:layout_width="0dp"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:text="AI" />
 
-        <Button
-            android:id="@+id/next_provider"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/next_ai"
-            android:text="›" />
+        <Button android:id="@+id/menu_button" android:layout_width="48dp" android:layout_height="44dp" android:contentDescription="@string/tools" android:text="⋮" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="6dp"
+        android:paddingBottom="4dp">
+
+        <Button android:id="@+id/previous_provider" android:layout_width="48dp" android:layout_height="44dp" android:contentDescription="@string/previous_ai" android:text="AI‹" />
 
         <Button
             android:id="@+id/account_button"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:minWidth="88dp"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
             android:text="@string/default_account" />
 
         <Button
-            android:id="@+id/new_chat_button"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/new_chat"
-            android:text="＋" />
+            android:id="@+id/workspace_button"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:text="@string/no_workspace_short" />
+
+        <Button android:id="@+id/next_provider" android:layout_width="48dp" android:layout_height="44dp" android:contentDescription="@string/next_ai" android:text="AI›" />
+        <Button android:id="@+id/new_chat_button" android:layout_width="48dp" android:layout_height="44dp" android:contentDescription="@string/new_chat" android:text="＋" />
     </LinearLayout>
 
     <FrameLayout
@@ -61,12 +67,8 @@
         android:orientation="horizontal"
         android:padding="8dp">
 
-        <Button
-            android:id="@+id/stop_button"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:contentDescription="@string/stop_generation"
-            android:text="■" />
+        <Button android:id="@+id/attach_button" android:layout_width="48dp" android:layout_height="48dp" android:contentDescription="@string/attach" android:text="＋" />
+        <Button android:id="@+id/stop_button" android:layout_width="48dp" android:layout_height="48dp" android:contentDescription="@string/stop_generation" android:text="■" />
 
         <EditText
             android:id="@+id/composer"
@@ -80,11 +82,6 @@
             android:minHeight="48dp"
             android:paddingHorizontal="12dp" />
 
-        <Button
-            android:id="@+id/send_button"
-            android:layout_width="64dp"
-            android:layout_height="48dp"
-            android:text="@string/send" />
+        <Button android:id="@+id/send_button" android:layout_width="64dp" android:layout_height="48dp" android:text="@string/send" />
     </LinearLayout>
-
 </LinearLayout>

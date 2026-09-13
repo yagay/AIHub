@@ -12,7 +12,12 @@ public record AiCommand(
         List<String> attachments) {
 
     public AiCommand {
+        if (type == null) throw new IllegalArgumentException("type is required");
         attachments = List.copyOf(attachments == null ? List.of() : attachments);
+    }
+
+    public static AiCommand simple(AiCommandType type) {
+        return new AiCommand(type, null, null, null, null, List.of());
     }
 
     public static AiCommand switchTo(String provider, String account, String workspace) {
@@ -21,5 +26,13 @@ public record AiCommand(
 
     public static AiCommand send(String text) {
         return new AiCommand(AiCommandType.SEND_TEXT, null, null, null, text, List.of());
+    }
+
+    public static AiCommand sendTo(String provider, String account, String workspace, String text) {
+        return new AiCommand(AiCommandType.SEND_TEXT, provider, account, workspace, text, List.of());
+    }
+
+    public static AiCommand attach(List<String> uris) {
+        return new AiCommand(AiCommandType.ATTACH, null, null, null, null, uris);
     }
 }
