@@ -1,13 +1,16 @@
 package com.yagay.aihub.ui;
 
-import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.widget.EditText;
 import android.widget.Toast;
+
+import androidx.activity.ComponentActivity;
 
 import com.yagay.aihub.data.AccountRepository;
 import com.yagay.aihub.data.AppPreferences;
 import com.yagay.aihub.model.AccountProfile;
+import com.yagay.aihub.model.ChatMessage;
 import com.yagay.aihub.model.ProviderSpec;
 import com.yagay.aihub.provider.AiProviderAdapter;
 import com.yagay.aihub.provider.ProviderRegistry;
@@ -16,9 +19,9 @@ import com.yagay.aihub.session.WebSessionManager;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Coordinates UI, provider registry, accounts and retained WebView sessions. */
+/** Coordinates native UI, provider configuration, accounts and retained WebView sessions. */
 public final class MainController implements MainScreen.Callback, WebSessionManager.Events {
-    private final Activity activity;
+    private final ComponentActivity activity;
     private final ProviderRegistry providers;
     private final AccountRepository accounts;
     private final AppPreferences preferences;
@@ -26,9 +29,8 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
     private final WebSessionManager sessions;
 
     private AiProviderAdapter currentProvider;
-    private AccountProfile currentAccount;
 
-    public MainController(Activity activity) {
+    public MainController(ComponentActivity activity) {
         this.activity = activity;
         providers = new ProviderRegistry(activity);
         accounts = new AccountRepository(activity);
@@ -49,6 +51,12 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
         String saved = preferences.providerId();
         if (saved == null || !providers.contains(saved)) saved = providers.all().get(0).spec().id();
         activateProvider(saved);
+    }
+
+    public void handleIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+        CharSequence shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        if (shared != null && !shared.toString().isBlank()) screen.setComposerText(shared.toString());
     }
 
     public boolean handleBack() {
@@ -97,6 +105,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
     @Override public void onNewChat() { sessions.newChat(); }
     @Override public void onReload() { sessions.reload(); }
     @Override public void onStop() { sessions.stopGeneration(); }
+    @Override public void onAttach() { sessions.requestAttachment(); }
     @Override public void onSend(String text) { sessions.send(text); }
 
     @Override
@@ -106,14 +115,18 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
 
     @Override
     public void onPageReady() {
-        // Reserved for future capability probing/status updates without coupling UI to WebView.
+        // Conversation synchronization is owned by WebSessionManager.
+    }
+
+    @Override
+    public void onConversationChanged(List<ChatMessage> messages) {
+        screen.showMessages(messages);
     }
 
     private void activateProvider(String providerId) {
         AiProviderAdapter adapter = providers.require(providerId);
         AccountProfile account = accounts.selected(providerId);
         currentProvider = adapter;
-        currentAccount = account;
         preferences.setProviderId(providerId);
 
         screen.showProvider(adapter.spec());
@@ -134,8 +147,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("Add", (dialog, which) -> {
                     String providerId = currentProvider.spec().id();
-                    AccountProfile created = accounts.add(providerId, input.getText().toString());
-                    currentAccount = created;
+                    accounts.add(providerId, input.getText().toString());
                     activateProvider(providerId);
                 })
                 .show();
