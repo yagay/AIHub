@@ -112,6 +112,16 @@ public final class WebSessionManager {
         if (session != null && requireNativeReady(session)) post(session, session.adapter.attachmentCommand());
     }
 
+    public void triggerProviderAction(String actionId) {
+        Session session = current();
+        if (session == null || !requireNativeReady(session)) return;
+        try {
+            post(session, session.adapter.uiActionCommand(actionId));
+        } catch (IllegalArgumentException error) {
+            events.onMessage("This APP control is not available for the current provider");
+        }
+    }
+
     public void reload() {
         Session session = current();
         if (session != null) session.geckoSession.reload();
@@ -273,9 +283,6 @@ public final class WebSessionManager {
 
         session.open(runtime);
 
-        // Built-in extensions are persistent and installation/upgrade is asynchronous. Register the
-        // session delegate first and only then navigate, so the first loaded provider page cannot
-        // outrun content-script installation. WEB still loads if bridge installation itself fails.
         Runnable loadInitial = () -> {
             if (holder.geckoSession == session) session.loadUri(initialUrl);
         };
