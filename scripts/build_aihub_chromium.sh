@@ -16,6 +16,7 @@ bash "$AIHUB_SOURCE/scripts/run_core_smoke_test.sh"
 python3 "$AIHUB_SOURCE/scripts/check_chromium_checkout.py" "$CHROMIUM_SRC"
 
 bash "$AIHUB_SOURCE/scripts/sync_to_chromium.sh" "$CHROMIUM_SRC"
+python3 "$CHROMIUM_SRC/aihub/scripts/apply_chrome_overlay.py" "$CHROMIUM_SRC"
 cd "$CHROMIUM_SRC"
 
 if [[ ! -d "$OUT" || ! -f "$OUT/args.gn" ]]; then
@@ -38,21 +39,16 @@ if ! command -v gn >/dev/null 2>&1; then
   exit 6
 fi
 
-gn desc "$OUT" //aihub/chromium-overlay:aihub_apk >/dev/null
+gn desc "$OUT" //chrome/android:chrome_public_apk >/dev/null
 
-echo "Building AIHub + local WebEngine support..."
-autoninja -C "$OUT" //aihub/chromium-overlay:aihub_local
+echo "Building full Chromium Chrome with AIHub overlay..."
+autoninja -C "$OUT" chrome_public_apk
 
-AIHUB_APK="$(find "$OUT/apks" -maxdepth 2 -type f -name 'AIHub.apk' -print -quit 2>/dev/null || true)"
-if [[ -z "$AIHUB_APK" ]]; then
-  echo "Build completed but AIHub.apk was not found under $OUT/apks." >&2
+CHROME_APK="$OUT/apks/ChromePublic.apk"
+if [[ ! -f "$CHROME_APK" ]]; then
+  echo "Build completed but $CHROME_APK was not found." >&2
   exit 7
 fi
 
-echo "Build complete: $CHROMIUM_SRC/$AIHUB_APK"
-SUPPORT_APK="$(find "$OUT/apks" -maxdepth 2 -type f \( -iname '*weblayer*support*.apk' -o -iname '*webengine*support*.apk' \) -print -quit 2>/dev/null || true)"
-if [[ -n "$SUPPORT_APK" ]]; then
-  echo "WebEngine support APK: $CHROMIUM_SRC/$SUPPORT_APK"
-else
-  echo "Warning: no WebEngine support APK was found under $OUT/apks." >&2
-fi
+echo "Build complete: $CHROMIUM_SRC/$CHROME_APK"
+echo "AIHub is embedded in the normal Chromium browser; no WebEngine/support APK is used."
