@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_RULES = ROOT / "chromium-overlay" / "assets" / "aihub" / "providers"
+DEFAULT_RULES = ROOT / "aihub-android" / "src" / "main" / "assets" / "aihub" / "providers"
 
 
 def load_rules(paths):
@@ -63,7 +63,6 @@ def main():
     if not private_key.is_file():
         raise SystemExit(f"private key not found: {private_key}")
 
-    # Validate the key up front and fail with a useful error before doing any file work.
     key_info = run_checked(
         ["openssl", "pkey", "-in", str(private_key), "-text_pub", "-noout"],
         "Could not read --private-key. Expected an Ed25519 private key in PEM format.",
@@ -86,8 +85,6 @@ def main():
         raise SystemExit("no provider JSON files selected")
     rules = load_rules(paths)
 
-    # Keep the payload deterministic. Android verifies these exact bytes, so no JSON canonicalization
-    # is required on the device.
     payload_obj = {"version": args.version, "rules": rules}
     payload = json.dumps(
         payload_obj,
