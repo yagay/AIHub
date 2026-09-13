@@ -44,5 +44,4 @@ android {
 dependencies {
     implementation("androidx.activity:activity:1.13.0")
     implementation("androidx.webkit:webkit:1.14.0")
-    compileOnly("io.github.libxposed:api:102.0.0")
 }
