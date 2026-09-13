@@ -1,9 +1,93 @@
-const BROKER = "http://127.0.0.1:3847";
+const BROKER = "ws://127.0.0.1:3847/bridge";
 const ports = new Map();
-let polling = false;
+let socket = null;
+let reconnectTimer = null;
+let reconnectDelay = 500;
+let pingTimer = null;
 
 function availableProviders() {
   return [...ports.keys()].filter((key) => ports.get(key)?.size > 0);
+}
+
+function send(message) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(message));
+  return true;
+}
+
+function announceProviders() {
+  send({ type: "providers", providers: availableProviders() });
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || availableProviders().length === 0) return;
+  const delay = reconnectDelay;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectBroker();
+  }, delay);
+  reconnectDelay = Math.min(reconnectDelay * 2, 10000);
+}
+
+function stopPing() {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = null;
+}
+
+function connectBroker() {
+  if (availableProviders().length === 0) return;
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+
+  try {
+    socket = new WebSocket(BROKER);
+  } catch (_) {
+    scheduleReconnect();
+    return;
+  }
+
+  socket.onopen = () => {
+    reconnectDelay = 500;
+    send({ type: "hello", providers: availableProviders(), version: chrome.runtime.getManifest().version });
+    stopPing();
+    pingTimer = setInterval(() => send({ type: "ping" }), 20000);
+  };
+
+  socket.onmessage = (event) => {
+    let message;
+    try { message = JSON.parse(event.data); } catch (_) { return; }
+    if (message?.type !== "command" || !message.id || !message.provider) return;
+
+    const set = ports.get(message.provider);
+    const list = set ? [...set] : [];
+    const port = list.length ? list[list.length - 1] : null;
+    if (!port) {
+      send({
+        type: "result",
+        id: message.id,
+        response: "",
+        error: `No active ${message.provider} tab in Titanium`,
+      });
+      return;
+    }
+
+    try {
+      port.postMessage(message);
+    } catch (error) {
+      send({
+        type: "result",
+        id: message.id,
+        response: "",
+        error: String(error?.message || error),
+      });
+    }
+  };
+
+  socket.onerror = () => {};
+  socket.onclose = () => {
+    stopPing();
+    socket = null;
+    scheduleReconnect();
+  };
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -15,19 +99,19 @@ chrome.runtime.onConnect.addListener((port) => {
       provider = message.provider;
       if (!ports.has(provider)) ports.set(provider, new Set());
       ports.get(provider).add(port);
-      startPolling();
+      connectBroker();
+      announceProviders();
       return;
     }
+
     if (message?.type === "result" && message.id) {
-      fetch(`${BROKER}/bridge/result`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: message.id,
-          response: message.response || "",
-          error: message.error || "",
-        }),
-      }).catch(() => {});
+      connectBroker();
+      send({
+        type: "result",
+        id: message.id,
+        response: message.response || "",
+        error: message.error || "",
+      });
     }
   });
 
@@ -35,27 +119,15 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!provider) return;
     ports.get(provider)?.delete(port);
     if (ports.get(provider)?.size === 0) ports.delete(provider);
+    announceProviders();
+    if (availableProviders().length === 0) {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      stopPing();
+      if (socket) {
+        try { socket.close(); } catch (_) {}
+        socket = null;
+      }
+    }
   });
 });
-
-async function startPolling() {
-  if (polling) return;
-  polling = true;
-  try {
-    while (availableProviders().length > 0) {
-      const providers = availableProviders();
-      try {
-        const response = await fetch(`${BROKER}/bridge/poll?providers=${encodeURIComponent(providers.join(","))}`, { cache: "no-store" });
-        if (response.status === 200) {
-          const command = await response.json();
-          const set = ports.get(command.provider);
-          const port = set && [...set].at(-1);
-          if (port) port.postMessage({ type: "command", ...command });
-        }
-      } catch (_) {}
-      await new Promise((resolve) => setTimeout(resolve, 350));
-    }
-  } finally {
-    polling = false;
-  }
-}
