@@ -12,8 +12,11 @@ import android.widget.Toast;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
+import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 
 import org.chromium.webengine.FragmentParams;
 import org.chromium.webengine.Tab;
@@ -27,6 +30,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
 /** Keeps Chromium/WebEngine API churn and Android file bridging in one class. */
 public final class AiWebEngineHost implements WebEngineSessionRuntime.WebEngineHost {
@@ -41,6 +45,12 @@ public final class AiWebEngineHost implements WebEngineSessionRuntime.WebEngineH
     private final ListenableFuture<WebSandbox> sandboxFuture;
     private final Map<String, WebFragment> fragments = new HashMap<>();
     private final Map<String, ListenableFuture<Tab>> tabs = new HashMap<>();
+    private final ListeningExecutorService uploadExecutor = MoreExecutors.listeningDecorator(
+            Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "AIHubUpload");
+                thread.setDaemon(true);
+                return thread;
+            }));
     private String visibleProfile;
 
     public AiWebEngineHost(Context context, FragmentManager fragmentManager, int containerViewId) {
@@ -90,18 +100,28 @@ public final class AiWebEngineHost implements WebEngineSessionRuntime.WebEngineH
     }
 
     @Override
-    public void attachFiles(String profileName, ListenableFuture<Tab> tabFuture, List<String> uriStrings) {
-        if (uriStrings == null || uriStrings.isEmpty()) return;
-        new Thread(() -> {
-            try {
-                List<UploadFile> files = readFiles(uriStrings);
-                context.getMainExecutor().execute(() -> injectFiles(tabFuture, files));
-            } catch (Exception error) {
-                context.getMainExecutor().execute(() -> Toast.makeText(context,
-                        "Attachment failed: " + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()),
-                        Toast.LENGTH_LONG).show());
+    public ListenableFuture<String> attachFiles(
+            String profileName,
+            ListenableFuture<Tab> tabFuture,
+            List<String> uriStrings) {
+        if (uriStrings == null || uriStrings.isEmpty()) {
+            return Futures.immediateFuture("{\"ok\":true,\"count\":0}");
+        }
+        ListenableFuture<List<UploadFile>> readFuture = uploadExecutor.submit(() -> readFiles(uriStrings));
+        ListenableFuture<String> result = Futures.transformAsync(
+                readFuture,
+                files -> injectFiles(tabFuture, files),
+                context.getMainExecutor());
+        Futures.addCallback(result, new FutureCallback<>() {
+            @Override public void onSuccess(String ignored) {}
+            @Override public void onFailure(Throwable error) {
+                Toast.makeText(context,
+                        "Attachment failed: " + (error.getMessage() == null
+                                ? error.getClass().getSimpleName() : error.getMessage()),
+                        Toast.LENGTH_LONG).show();
             }
-        }, "AIHubUpload").start();
+        }, context.getMainExecutor());
+        return result;
     }
 
     private List<UploadFile> readFiles(List<String> uriStrings) throws Exception {
@@ -131,7 +151,7 @@ public final class AiWebEngineHost implements WebEngineSessionRuntime.WebEngineH
         return out;
     }
 
-    private void injectFiles(ListenableFuture<Tab> tabFuture, List<UploadFile> files) {
+    private ListenableFuture<String> injectFiles(ListenableFuture<Tab> tabFuture, List<UploadFile> files) {
         ListenableFuture<String> chain = Futures.transformAsync(tabFuture,
                 tab -> tab.executeScript(GenericDomScriptFactory.uploadInit(files.size()), false),
                 context.getMainExecutor());
@@ -139,16 +159,26 @@ public final class AiWebEngineHost implements WebEngineSessionRuntime.WebEngineH
             UploadFile file = files.get(fileIndex);
             for (int start = 0; start < file.base64().length(); start += UPLOAD_CHUNK_CHARS) {
                 int index = fileIndex;
-                String chunk = file.base64().substring(start, Math.min(file.base64().length(), start + UPLOAD_CHUNK_CHARS));
+                String chunk = file.base64().substring(start,
+                        Math.min(file.base64().length(), start + UPLOAD_CHUNK_CHARS));
                 chain = Futures.transformAsync(chain, ignored -> Futures.transformAsync(tabFuture,
                         tab -> tab.executeScript(GenericDomScriptFactory.uploadAppend(
                                 index, file.name(), file.mime(), chunk), false),
                         context.getMainExecutor()), context.getMainExecutor());
             }
         }
-        Futures.transformAsync(chain, ignored -> Futures.transformAsync(tabFuture,
-                tab -> tab.executeScript(GenericDomScriptFactory.uploadCommit(), false),
+        return Futures.transformAsync(chain, ignored -> Futures.transformAsync(tabFuture,
+                tab -> Futures.transform(
+                        tab.executeScript(GenericDomScriptFactory.uploadCommit(), false),
+                        AiWebEngineHost::requireSuccessfulUpload,
+                        context.getMainExecutor()),
                 context.getMainExecutor()), context.getMainExecutor());
+    }
+
+    private static String requireSuccessfulUpload(String result) {
+        String value = result == null ? "" : result;
+        if (value.contains("\"ok\":true") || value.contains("\\\"ok\\\":true")) return value;
+        throw new IllegalStateException("Page rejected attachment: " + value);
     }
 
     private static String displayName(ContentResolver resolver, Uri uri) {
