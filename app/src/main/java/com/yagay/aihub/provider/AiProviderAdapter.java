@@ -13,4 +13,5 @@ public interface AiProviderAdapter {
     JSONObject stopCommand();
     JSONObject attachmentCommand();
     JSONObject presentationCommand(boolean appMode);
+    JSONObject uiActionCommand(String actionId);
 }
