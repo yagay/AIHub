@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AIHub</string>
+    <string name="choose_ai">Choose AI</string>
+    <string name="choose_account">Choose account</string>
+    <string name="add_account">＋ Add account</string>
+    <string name="account_name_hint">Account name</string>
+    <string name="default_account">Default</string>
+    <string name="previous_ai">Previous AI</string>
+    <string name="next_ai">Next AI</string>
+    <string name="new_chat">New chat</string>
+    <string name="stop_generation">Stop generation</string>
+    <string name="composer_hint">Ask anything…</string>
+    <string name="send">Send</string>
+    <string name="integration_token">Third-party client token</string>
+    <string name="copy">Copy</string>
+    <string name="token_copied">Token copied</string>
+</resources>
