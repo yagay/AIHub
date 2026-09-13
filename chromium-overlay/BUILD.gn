@@ -18,6 +18,7 @@ android_assets("aihub_assets") {
     "assets/aihub/providers/gemini.json",
     "assets/aihub/providers/grok.json",
     "assets/aihub/providers/deepseek.json",
+    "assets/aihub/rules_public_key.txt",
   ]
   renaming_destinations = [
     "aihub/providers/chatgpt.json",
@@ -25,6 +26,7 @@ android_assets("aihub_assets") {
     "aihub/providers/gemini.json",
     "aihub/providers/grok.json",
     "aihub/providers/deepseek.json",
+    "aihub/rules_public_key.txt",
   ]
 }
 
@@ -64,6 +66,7 @@ android_library("aihub_java") {
     "java/com/yagay/aihub/chromium/GenericDomScriptFactory.java",
     "java/com/yagay/aihub/chromium/ProviderRuleCodec.java",
     "java/com/yagay/aihub/chromium/ProviderRuleLoader.java",
+    "java/com/yagay/aihub/chromium/SignedProviderRuleBundle.java",
     "java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
   ]
   srcjar_deps = [ ":aihub_aidl" ]
