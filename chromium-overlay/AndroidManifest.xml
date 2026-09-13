@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.yagay.aihub">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AIHubTheme">
+
+        <activity
+            android:name="com.yagay.aihub.chromium.AiHubShellActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aihub" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="com.yagay.aihub.action.SWITCH" />
+                <action android:name="com.yagay.aihub.action.SEND_TEXT" />
+                <action android:name="com.yagay.aihub.action.NEW_CHAT" />
+                <action android:name="com.yagay.aihub.action.STOP" />
+                <action android:name="com.yagay.aihub.action.NEXT_PROVIDER" />
+                <action android:name="com.yagay.aihub.action.PREVIOUS_PROVIDER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <meta-data
+            android:name="org.chromium.webengine.shell.BrowserProcessMode"
+            android:value="local" />
+    </application>
+</manifest>
