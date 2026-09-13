@@ -16,8 +16,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 28
         targetSdk = 36
-        versionCode = aihubVersionCode ?: 400
-        versionName = aihubVersionName ?: "0.4.0"
+        versionCode = aihubVersionCode ?: 500
+        versionName = aihubVersionName ?: "0.5.0"
 
         aihubAbi?.takeIf { it.isNotBlank() }?.let { abi ->
             ndk { abiFilters += abi }
@@ -37,4 +37,5 @@ android {
 dependencies {
     implementation("androidx.activity:activity:1.13.0")
     implementation("androidx.webkit:webkit:1.14.0")
+    compileOnly("io.github.libxposed:api:102.0.0")
 }
