@@ -1,7 +1,8 @@
 (() => {
   const NATIVE_APP = "aihub";
+  const APP_CLASS = "aihub-native-app-mode";
+  const STYLE_ID = "aihub-native-app-style";
   let port = null;
-  let dirtyTimer = 0;
 
   const connect = () => {
     try {
@@ -82,8 +83,6 @@
       return;
     }
 
-    // ProseMirror and other contenteditable editors usually need an editing operation rather than
-    // a raw textContent assignment so their framework state observes the change.
     let inserted = false;
     try {
       const selection = getSelection();
@@ -104,43 +103,36 @@
     return true;
   };
 
-  const collectMessages = command => {
-    const roles = new Map();
-    const add = (list, role) => {
-      for (const selector of list) {
-        let nodes = [];
-        try { nodes = document.querySelectorAll(selector); } catch (_) { continue; }
-        for (const node of nodes) {
-          if (!roles.has(node)) roles.set(node, role);
-        }
-      }
-    };
-    add(selectors(command, 'userMessage'), 'user');
-    add(selectors(command, 'assistantMessage'), 'assistant');
-
-    const ordered = [...roles.entries()]
-      .sort((a, b) => {
-        if (a[0] === b[0]) return 0;
-        const position = a[0].compareDocumentPosition(b[0]);
-        return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-      })
-      .map(([node, role]) => ({
-        role,
-        text: (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim()
-      }))
-      .filter(item => item.text.length > 0);
-
-    const deduped = [];
-    for (const item of ordered) {
-      const previous = deduped[deduped.length - 1];
-      if (previous && previous.role === item.role && previous.text === item.text) continue;
-      deduped.push(item);
-    }
-    return deduped.slice(-100);
-  };
-
   const findComposer = command => firstVisible(selectors(command, 'input')) ||
     [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')].find(visible) || null;
+
+  const cssList = command => {
+    const all = [
+      ...selectors(command, 'input'),
+      ...selectors(command, 'send'),
+      ...selectors(command, 'stop'),
+      ...selectors(command, 'attachment')
+    ];
+    const unique = [...new Set(all.filter(Boolean))];
+    return unique.map(selector => `html.${APP_CLASS} ${selector}`).join(',\n');
+  };
+
+  const applyPresentation = (command, appMode) => {
+    let style = document.getElementById(STYLE_ID);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = STYLE_ID;
+      (document.head || document.documentElement).appendChild(style);
+    }
+
+    const targets = cssList(command);
+    style.textContent = targets ? `${targets} {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }` : '';
+    document.documentElement.classList.toggle(APP_CLASS, !!appMode);
+    return true;
+  };
 
   const handleCommand = command => {
     if (!command || typeof command !== 'object') return;
@@ -150,12 +142,16 @@
 
     if (action === 'probe') {
       const input = findComposer(command);
-      respond({
-        ok: !!input,
-        composer: !!input,
-        messageMirror: selectors(command, 'userMessage').length > 0 || selectors(command, 'assistantMessage').length > 0,
-        url: location.href
-      });
+      respond({ ok: !!input, composer: !!input, url: location.href });
+      return;
+    }
+
+    if (action === 'presentation') {
+      try {
+        respond({ ok: applyPresentation(command, !!command.appMode), url: location.href });
+      } catch (_) {
+        respond({ ok: false, url: location.href });
+      }
       return;
     }
 
@@ -191,21 +187,9 @@
 
     if (action === 'attach') {
       respond({ ok: clickAction(selectors(command, 'attachment'), ['attach', 'upload', 'file', '附件', '上传']) });
-      return;
-    }
-
-    if (action === 'sync') {
-      respond({ ok: true, messages: collectMessages(command), url: location.href });
     }
   };
 
-  const markDirty = () => {
-    clearTimeout(dirtyTimer);
-    dirtyTimer = setTimeout(() => post({ type: 'dirty', url: location.href }), 180);
-  };
-
-  const observer = new MutationObserver(markDirty);
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   addEventListener('popstate', () => post({ type: 'location', url: location.href }));
   addEventListener('hashchange', () => post({ type: 'location', url: location.href }));
   connect();
