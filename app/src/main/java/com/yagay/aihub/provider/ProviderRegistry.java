@@ -1,47 +1,29 @@
 package com.yagay.aihub.provider;
 
+import android.content.Context;
+
 import com.yagay.aihub.model.ProviderSpec;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Single source of truth for available AI providers. */
+/** Loads provider differences from one configuration file, then wraps them in shared adapters. */
 public final class ProviderRegistry {
     private final Map<String, AiProviderAdapter> adapters = new LinkedHashMap<>();
 
-    public ProviderRegistry() {
-        register(new GenericWebProviderAdapter(new ProviderSpec(
-                "chatgpt", "ChatGPT", "https://chatgpt.com/",
-                List.of("#prompt-textarea", "textarea"),
-                List.of("button[data-testid='send-button']", "button[aria-label*='Send']"),
-                List.of("a[href='/']", "button[aria-label*='New chat']"),
-                List.of("button[aria-label*='Stop']"))));
-        register(new GenericWebProviderAdapter(new ProviderSpec(
-                "claude", "Claude", "https://claude.ai/new",
-                List.of("div[contenteditable='true']", "textarea"),
-                List.of("button[aria-label*='Send']"),
-                List.of("a[href='/new']", "button[aria-label*='New']"),
-                List.of("button[aria-label*='Stop']"))));
-        register(new GenericWebProviderAdapter(new ProviderSpec(
-                "gemini", "Gemini", "https://gemini.google.com/app",
-                List.of(".ql-editor[contenteditable='true']", "div[contenteditable='true']", "textarea"),
-                List.of("button[aria-label*='Send']", "button[aria-label*='submit']"),
-                List.of("a[href='/app']", "button[aria-label*='New chat']"),
-                List.of("button[aria-label*='Stop']"))));
-        register(new GenericWebProviderAdapter(new ProviderSpec(
-                "grok", "Grok", "https://grok.com/",
-                List.of("textarea", "div[contenteditable='true']"),
-                List.of("button[aria-label*='Send']"),
-                List.of("a[href='/']", "button[aria-label*='New']"),
-                List.of("button[aria-label*='Stop']"))));
-        register(new GenericWebProviderAdapter(new ProviderSpec(
-                "deepseek", "DeepSeek", "https://chat.deepseek.com/",
-                List.of("textarea", "div[contenteditable='true']"),
-                List.of("button[aria-label*='Send']"),
-                List.of("button[aria-label*='New']", "a[href='/']"),
-                List.of("button[aria-label*='Stop']"))));
+    public ProviderRegistry(Context context) {
+        for (ProviderSpec spec : loadSpecs(context)) {
+            register(new GenericWebProviderAdapter(spec));
+        }
+        if (adapters.isEmpty()) throw new IllegalStateException("No AI providers configured");
     }
 
     public void register(AiProviderAdapter adapter) {
@@ -60,5 +42,44 @@ public final class ProviderRegistry {
 
     public boolean contains(String providerId) {
         return adapters.containsKey(providerId);
+    }
+
+    private static List<ProviderSpec> loadSpecs(Context context) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                context.getAssets().open("providers.json"), StandardCharsets.UTF_8))) {
+            StringBuilder json = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) json.append(line).append('\n');
+
+            JSONArray array = new JSONArray(json.toString());
+            List<ProviderSpec> out = new ArrayList<>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.getJSONObject(i);
+                JSONObject selectors = item.optJSONObject("selectors");
+                out.add(new ProviderSpec(
+                        item.getString("id"),
+                        item.getString("name"),
+                        item.getString("homeUrl"),
+                        strings(selectors, "input"),
+                        strings(selectors, "send"),
+                        strings(selectors, "newChat"),
+                        strings(selectors, "stop")));
+            }
+            return out;
+        } catch (Exception error) {
+            throw new IllegalStateException("Cannot load providers.json", error);
+        }
+    }
+
+    private static List<String> strings(JSONObject object, String key) {
+        if (object == null) return List.of();
+        JSONArray array = object.optJSONArray(key);
+        if (array == null) return List.of();
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < array.length(); i++) {
+            String value = array.optString(i, "").trim();
+            if (!value.isEmpty()) out.add(value);
+        }
+        return List.copyOf(out);
     }
 }
