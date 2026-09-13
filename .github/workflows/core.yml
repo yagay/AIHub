@@ -24,16 +24,16 @@ jobs:
         with:
           node-version: '20'
 
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Build Titanium no-API extension
         run: bash tools/build_titanium_extension.sh
 
       - name: Build reused NextChat UI
         run: bash tools/build_nextchat_ui.sh
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
 
       - uses: android-actions/setup-android@v3
         with:
@@ -61,14 +61,20 @@ jobs:
           -PaihubVersionName=0.5.0.${{ github.run_number }}
           --stacktrace --no-daemon
 
-      - name: Verify packaged NextChat runtime
+      - name: Verify packaged NextChat and Titanium runtime
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           unzip -Z1 "$APK" | grep -q '^assets/ui/index.html$'
           unzip -Z1 "$APK" | grep -q '^assets/ui/_next/static/chunks/main-app-.*\.js$'
           unzip -Z1 "$APK" | grep -q '^assets/ui/_next/static/.*\.css$'
           unzip -Z1 "$APK" | grep -q '^assets/titanium-extension/manifest.json$'
-          echo "Verified NextChat _next runtime and Titanium extension are inside APK"
+          unzip -Z1 "$APK" | grep -q '^assets/titanium-extension/EXTENSION_ID$'
+          EXT_ID="$(unzip -p "$APK" assets/titanium-extension/EXTENSION_ID | tr -d '\r\n')"
+          test "${#EXT_ID}" -eq 32
+          unzip -Z1 "$APK" | grep -q "^assets/titanium-extension/${EXT_ID}\.crx$"
+          unzip -Z1 "$APK" | grep -q "^assets/titanium-extension/${EXT_ID}\.json$"
+          unzip -p "$APK" "assets/titanium-extension/${EXT_ID}.crx" | head -c 4 | grep -q '^Cr24$'
+          echo "Verified NextChat and Titanium external-extension CRX: $EXT_ID"
 
       - name: Android lint
         run: >-
