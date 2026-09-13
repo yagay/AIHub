@@ -84,8 +84,7 @@ public final class WebSessionManager {
         if (session == null) {
             session = new Session(key, adapter, account, contextId);
             sessions.put(key, session);
-            createSession(session);
-            session.geckoSession.loadUri(adapter.spec().homeUrl());
+            createSession(session, adapter.spec().homeUrl());
         }
         currentKey = key;
         attachToView(session.geckoSession);
@@ -143,7 +142,7 @@ public final class WebSessionManager {
         appModeRequested = true;
         if (session.bridgePort == null) {
             setActualAppMode(false);
-            events.onMessage("The page bridge is not ready yet. Stay in WEB mode until loading finishes.");
+            events.onMessage("The page bridge is not ready yet. Reload WEB once if this page was opened before the bridge update.");
             return;
         }
         requestProbe(session);
@@ -162,7 +161,7 @@ public final class WebSessionManager {
         currentKey = null;
     }
 
-    private void createSession(Session holder) {
+    private void createSession(Session holder, String initialUrl) {
         GeckoSessionSettings settings = new GeckoSessionSettings.Builder()
                 .contextId(holder.contextId)
                 .useTrackingProtection(false)
@@ -178,8 +177,7 @@ public final class WebSessionManager {
                 String target = holder.lastUrl == null ? holder.adapter.spec().homeUrl() : holder.lastUrl;
                 if (geckoView.getSession() == crashed) geckoView.releaseSession();
                 destroySession(holder);
-                createSession(holder);
-                holder.geckoSession.loadUri(target);
+                createSession(holder, target);
                 if (selected) {
                     appModeRequested = false;
                     setActualAppMode(false);
@@ -199,8 +197,6 @@ public final class WebSessionManager {
                 holder.lastUrl = url;
                 holder.appCapable = false;
                 if (holder.key.equals(currentKey)) {
-                    // A navigation never creates a second APP state. The new live page is always
-                    // visible immediately; native controls are re-enabled only after a fresh probe.
                     setActualAppMode(false);
                     if (!holder.adapter.spec().ownsUrl(url)) appModeRequested = false;
                 }
@@ -234,9 +230,7 @@ public final class WebSessionManager {
             public void onPageStop(GeckoSession loaded, boolean success) {
                 if (!holder.key.equals(currentKey)) return;
                 events.onPageReady();
-                if (success && appModeRequested && holder.bridgePort != null && isTrusted(holder)) {
-                    requestProbe(holder);
-                }
+                if (success && appModeRequested && holder.bridgePort != null && isTrusted(holder)) requestProbe(holder);
             }
         });
 
@@ -248,13 +242,9 @@ public final class WebSessionManager {
                 GeckoResult<GeckoSession.PromptDelegate.PromptResponse> result = new GeckoResult<>();
                 boolean multiple = prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE;
                 boolean opened = filePicker.show(prompt.mimeTypes, multiple, uris -> {
-                    if (uris == null || uris.length == 0) {
-                        result.complete(prompt.dismiss());
-                    } else if (uris.length == 1) {
-                        result.complete(prompt.confirm(activity.getApplicationContext(), uris[0]));
-                    } else {
-                        result.complete(prompt.confirm(activity.getApplicationContext(), uris));
-                    }
+                    if (uris == null || uris.length == 0) result.complete(prompt.dismiss());
+                    else if (uris.length == 1) result.complete(prompt.confirm(activity.getApplicationContext(), uris[0]));
+                    else result.complete(prompt.confirm(activity.getApplicationContext(), uris));
                 });
                 if (!opened) result.complete(prompt.dismiss());
                 return result;
@@ -282,10 +272,17 @@ public final class WebSessionManager {
         });
 
         session.open(runtime);
-        attachBridge(holder);
+
+        // Built-in extensions are persistent and installation/upgrade is asynchronous. Register the
+        // session delegate first and only then navigate, so the first loaded provider page cannot
+        // outrun content-script installation. WEB still loads if bridge installation itself fails.
+        Runnable loadInitial = () -> {
+            if (holder.geckoSession == session) session.loadUri(initialUrl);
+        };
+        attachBridge(holder, loadInitial);
     }
 
-    private void attachBridge(Session holder) {
+    private void attachBridge(Session holder, Runnable onReadyToLoad) {
         GeckoEngine.attachBridge(
                 activity,
                 holder.geckoSession,
@@ -317,8 +314,11 @@ public final class WebSessionManager {
                         if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) requestProbe(holder);
                     }
                 },
-                () -> {},
-                error -> events.onMessage("AIHub browser bridge failed to load"));
+                onReadyToLoad,
+                error -> {
+                    events.onMessage("AIHub bridge could not start; WEB mode is still available");
+                    onReadyToLoad.run();
+                });
     }
 
     private void handleBridgeMessage(Session holder, JSONObject message) {
@@ -338,8 +338,6 @@ public final class WebSessionManager {
             holder.appCapable = ok && message.optBoolean("composer", false);
             if (!holder.key.equals(currentKey) || !appModeRequested) return;
             if (holder.appCapable) {
-                // APP mode is not a second conversation. It only changes presentation and enables
-                // native controls around this exact page/session.
                 post(holder, holder.adapter.presentationCommand(true));
                 setActualAppMode(true);
             } else {
