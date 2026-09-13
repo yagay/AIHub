@@ -2,11 +2,7 @@
   "id": "chatgpt",
   "displayName": "ChatGPT",
   "homeUrl": "https://chatgpt.com/",
+  "order": 10,
   "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
-  "selectors": {
-    "input": [],
-    "send": [],
-    "newChat": [],
-    "stop": []
-  }
+  "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
 }

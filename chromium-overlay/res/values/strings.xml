@@ -2,6 +2,9 @@
 <resources>
     <string name="app_name">AIHub</string>
     <string name="choose_ai">Choose AI</string>
+    <string name="add_ai_website">＋ Add AI website</string>
+    <string name="ai_name_hint">AI name (for example Perplexity)</string>
+    <string name="ai_url_hint">https://example.com</string>
     <string name="choose_account">Choose account</string>
     <string name="add_account">＋ Add account</string>
     <string name="account_name_hint">Account name</string>

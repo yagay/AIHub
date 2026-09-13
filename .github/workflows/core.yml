@@ -1,0 +1,20 @@
+name: AIHub Core Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Validate provider rules and architecture
+        run: python3 scripts/validate_provider_rules.py
+      - name: Run core smoke test
+        run: bash scripts/run_core_smoke_test.sh

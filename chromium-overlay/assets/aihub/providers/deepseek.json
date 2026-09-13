@@ -2,6 +2,7 @@
   "id": "deepseek",
   "displayName": "DeepSeek",
   "homeUrl": "https://chat.deepseek.com/",
+  "order": 50,
   "capabilities": ["TEXT", "FILE_UPLOAD", "NEW_CHAT", "STOP"],
   "selectors": {"input": [], "send": [], "newChat": [], "stop": []}
 }

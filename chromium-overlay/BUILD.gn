@@ -61,6 +61,7 @@ android_library("aihub_java") {
     "java/com/yagay/aihub/chromium/AiHubStateStore.java",
     "java/com/yagay/aihub/chromium/AiWebEngineHost.java",
     "java/com/yagay/aihub/chromium/GenericDomScriptFactory.java",
+    "java/com/yagay/aihub/chromium/ProviderRuleCodec.java",
     "java/com/yagay/aihub/chromium/ProviderRuleLoader.java",
     "java/com/yagay/aihub/chromium/WebEngineSessionRuntime.java",
   ]
