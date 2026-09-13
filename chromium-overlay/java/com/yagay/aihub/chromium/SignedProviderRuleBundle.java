@@ -79,21 +79,21 @@ public final class SignedProviderRuleBundle {
     }
 
     public Verified install(String envelopeJson) throws Exception {
+        // The incoming bundle must always verify against the currently packaged key first.
         Verified incoming = verify(envelopeJson);
+        int currentVersion = 0;
         String currentEnvelope = stateStore.remoteRuleBundle();
         if (currentEnvelope != null && !currentEnvelope.isBlank()) {
             try {
-                Verified current = verify(currentEnvelope);
-                if (incoming.version() <= current.version()) {
-                    throw new IllegalArgumentException(
-                            "Rule bundle version " + incoming.version()
-                                    + " is not newer than installed version " + current.version());
-                }
-            } catch (SecurityException | IllegalArgumentException error) {
-                throw error;
+                currentVersion = verify(currentEnvelope).version();
             } catch (Exception ignored) {
-                // A previously stored bundle that can no longer be verified must not block recovery.
+                // Old-key/corrupt state may be replaced by a newly verified bundle.
             }
+        }
+        if (currentVersion > 0 && incoming.version() <= currentVersion) {
+            throw new IllegalArgumentException(
+                    "Rule bundle version " + incoming.version()
+                            + " is not newer than installed version " + currentVersion);
         }
         stateStore.installRemoteRuleBundle(envelopeJson);
         return incoming;
@@ -108,7 +108,6 @@ public final class SignedProviderRuleBundle {
     public boolean rollback() throws Exception {
         if (!stateStore.canRollbackRemoteRuleBundle()) return false;
         if (!stateStore.rollbackRemoteRuleBundle()) return false;
-        // Verify after swapping. If the previous slot is invalid, swap back before failing.
         try {
             loadInstalled();
             return true;
