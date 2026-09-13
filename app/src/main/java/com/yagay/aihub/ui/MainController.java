@@ -19,7 +19,7 @@ import com.yagay.aihub.session.WebSessionManager;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Coordinates native UI, provider configuration, accounts and retained WebView sessions. */
+/** Coordinates native UI, provider configuration, accounts and retained Gecko sessions. */
 public final class MainController implements MainScreen.Callback, WebSessionManager.Events {
     private final ComponentActivity activity;
     private final ProviderRegistry providers;
@@ -45,8 +45,11 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
         List<ProviderSpec> specs = new ArrayList<>();
         for (AiProviderAdapter adapter : providers.all()) specs.add(adapter.spec());
         screen.setProviders(specs);
-        sessions.setAppModeEnabled(preferences.appModeEnabled());
-        screen.showAppMode(preferences.appModeEnabled());
+
+        // WEB is always the safe startup state. APP is enabled only after the live page passes a
+        // capability probe, so login/verification pages can never be hidden behind an empty shell.
+        preferences.setAppModeEnabled(false);
+        screen.showAppMode(false);
 
         String saved = preferences.providerId();
         if (saved == null || !providers.contains(saved)) saved = providers.all().get(0).spec().id();
@@ -96,10 +99,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
 
     @Override
     public void onAppModeToggled() {
-        boolean enabled = !sessions.isAppModeEnabled();
-        sessions.setAppModeEnabled(enabled);
-        preferences.setAppModeEnabled(enabled);
-        screen.showAppMode(enabled);
+        sessions.setAppModeEnabled(!sessions.isAppModeEnabled());
     }
 
     @Override public void onNewChat() { sessions.newChat(); }
@@ -115,12 +115,18 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
 
     @Override
     public void onPageReady() {
-        // Conversation synchronization is owned by WebSessionManager.
+        // Capability probing and conversation synchronization are owned by WebSessionManager.
     }
 
     @Override
     public void onConversationChanged(List<ChatMessage> messages) {
         screen.showMessages(messages);
+    }
+
+    @Override
+    public void onAppModeChanged(boolean enabled) {
+        screen.showAppMode(enabled);
+        preferences.setAppModeEnabled(enabled);
     }
 
     private void activateProvider(String providerId) {
