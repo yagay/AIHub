@@ -22,6 +22,8 @@
     <string name="send">Send</string>
     <string name="share_confirm_title">Send to AIHub?</string>
     <string name="share_confirm_message">The shared text/files will be sent using your currently selected AI account.</string>
+    <string name="link_confirm_title">Run AIHub link?</string>
+    <string name="link_confirm_message">This link requests an action in AIHub. Continue only if you trust the app or page that opened it.</string>
     <string name="external_request_denied">External AIHub request rejected.</string>
     <string name="browser_back">Back</string>
     <string name="browser_forward">Forward</string>
