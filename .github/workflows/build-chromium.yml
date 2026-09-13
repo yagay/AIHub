@@ -127,11 +127,21 @@ jobs:
           git reset --hard HEAD
           git clean -fd
           git remote set-url origin https://github.com/yagay/chromium.git
-          git fetch --prune origin "$CHROMIUM_REF"
-          git checkout --detach FETCH_HEAD
+
+          if [[ "$CHROMIUM_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            # Pull the fork branch first so a pinned SHA that belongs to main is available locally.
+            git fetch --prune origin main
+            if ! git cat-file -e "${CHROMIUM_REF}^{commit}" 2>/dev/null; then
+              git fetch origin "$CHROMIUM_REF"
+            fi
+            git checkout --detach "$CHROMIUM_REF"
+          else
+            git fetch --prune origin "$CHROMIUM_REF"
+            git checkout --detach FETCH_HEAD
+          fi
 
           echo "Chromium checkout: $(git rev-parse HEAD)"
-          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]]; then
+          if [[ "$CHROMIUM_REF" =~ ^[0-9a-fA-F]{40}$ ]] && [[ "$(git rev-parse HEAD)" != "$CHROMIUM_REF" ]]; then
             echo "Failed to select requested Chromium revision." >&2
             exit 1
           fi
