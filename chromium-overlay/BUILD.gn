@@ -59,6 +59,7 @@ android_library("aihub_java") {
     "java/com/yagay/aihub/chromium/AiHubBinderService.java",
     "java/com/yagay/aihub/chromium/AiHubBootstrap.java",
     "java/com/yagay/aihub/chromium/AiHubDiagnostics.java",
+    "java/com/yagay/aihub/chromium/AiHubEntryActivity.java",
     "java/com/yagay/aihub/chromium/AiHubExternalCommandParser.java",
     "java/com/yagay/aihub/chromium/AiHubShellActivity.java",
     "java/com/yagay/aihub/chromium/AiHubStateStore.java",
