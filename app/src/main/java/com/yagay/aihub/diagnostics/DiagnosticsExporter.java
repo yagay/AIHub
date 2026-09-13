@@ -72,6 +72,7 @@ public final class DiagnosticsExporter {
                     addText(zip, "logcat.txt", redact(collectLogcat()));
                     addText(zip, "README.txt",
                             "AIHub diagnostic bundle.\n"
+                                    + "Root filesystem inspection is executed in PID 1's mount namespace when available, matching TitaniumManager.\n"
                                     + "This bundle intentionally does NOT export browser Cookies, Login Data, Web Data, chat history, provider prompts, or provider responses.\n"
                                     + "Sensitive-looking authorization/token/cookie strings in logcat are redacted best-effort.\n");
                 }
@@ -124,7 +125,8 @@ public final class DiagnosticsExporter {
                 + "echo '--- package fields ---'; dumpsys package " + TITANIUM_PACKAGE
                 + " 2>/dev/null | grep -E 'versionName=|versionCode=|userId=|dataDir=|pkg=|flags=' | head -120; "
                 + "echo '--- candidate data dirs ---'; for d in /data/user/*/" + TITANIUM_PACKAGE
-                + " /data/data/" + TITANIUM_PACKAGE + "; do [ -d \"$d\" ] && { echo \"DIR=$d\"; stat -c 'uid=%u gid=%g mode=%a' \"$d\" 2>/dev/null; }; done";
+                + " /data/data/" + TITANIUM_PACKAGE + "; do [ -d \"$d\" ] && { echo \"DIR=$d\"; stat -c 'uid=%u gid=%g mode=%a' \"$d\" 2>/dev/null; "
+                + "echo \"CHROME_DIR=$d/app_chrome\"; [ -d \"$d/app_chrome\" ] && stat -c 'chrome_uid=%u chrome_gid=%g chrome_mode=%a' \"$d/app_chrome\" 2>/dev/null || true; }; done; true";
         return rootCommand(command, 15);
     }
 
@@ -139,18 +141,23 @@ public final class DiagnosticsExporter {
                 + "j=\"$e/" + extensionId + ".json\"; c=\"$e/" + extensionId + ".crx\"; b=\"$e/" + extensionId + ".aihub-build\"; "
                 + "echo '--- external json ---'; [ -f \"$j\" ] && cat \"$j\" || echo missing; "
                 + "echo; echo '--- crx ---'; [ -f \"$c\" ] && { stat -c 'size=%s uid=%u gid=%g mode=%a' \"$c\"; echo -n 'magic='; od -An -tx1 -N4 \"$c\"; sha256sum \"$c\" 2>/dev/null || true; } || echo missing; "
-                + "echo '--- build marker ---'; [ -f \"$b\" ] && cat \"$b\" || echo missing; "
-                + "echo; echo '--- installed extension extraction ---'; find \"$d/app_chrome/Default/Extensions/" + extensionId + "\" -maxdepth 3 -type f -print 2>/dev/null | head -100; "
+                + "echo '--- build marker ---'; if [ -f \"$b\" ]; then actual_build=$(cat \"$b\" 2>/dev/null); echo \"$actual_build\"; [ \"$actual_build\" = " + shell(buildId) + " ] && echo build_match=yes || echo build_match=no; else echo missing; echo build_match=no; fi; "
+                + "echo; echo '--- installed extension profiles ---'; "
+                + "for p in \"$d/app_chrome\"/*; do [ -d \"$p\" ] || continue; x=\"$p/Extensions/" + extensionId + "\"; [ -d \"$x\" ] || continue; "
+                + "echo \"PROFILE=$(basename \"$p\")\"; find \"$x\" -maxdepth 3 -type f -print 2>/dev/null | head -120; "
+                + "for m in \"$x\"/*/manifest.json; do [ -f \"$m\" ] && { echo \"manifest_file=$m\"; grep -m1 -E '\"version\"[[:space:]]*:' \"$m\" 2>/dev/null || true; }; done; "
+                + "for w in \"$x\"/*/service-worker.js; do [ -f \"$w\" ] && { grep -q 'AIHUB_BRIDGE_WORKER_V3' \"$w\" 2>/dev/null && echo worker_marker=AIHUB_BRIDGE_WORKER_V3 || echo worker_marker=old_or_missing; }; done; done; "
                 + "echo '--- profile files containing extension id (filenames only) ---'; "
-                + "for p in \"$d/app_chrome/Default/Preferences\" \"$d/app_chrome/Default/Secure Preferences\" \"$d/app_chrome/Local State\"; do "
+                + "for p in \"$d/app_chrome/Local State\" \"$d/app_chrome\"/*/Preferences \"$d/app_chrome\"/*/'Secure Preferences'; do "
                 + "[ -f \"$p\" ] && grep -q -F '" + extensionId + "' \"$p\" 2>/dev/null && echo \"contains_id=$p\"; done; "
-                + "done";
-        return rootCommand(command, 20);
+                + "done; true";
+        return rootCommand(command, 25);
     }
 
     private static String collectProcessAndNetwork() {
         String command = "echo '--- processes ---'; ps -A -o USER,PID,PPID,NAME,ARGS 2>/dev/null | grep -E '(^| )com\\.yagay\\.aihub|io\\.github\\.jqssun\\.helium|chromium' | head -120 || true; "
-                + "echo '--- port 3847 ---'; ss -ltnp 2>/dev/null | grep ':3847' || netstat -ltnp 2>/dev/null | grep ':3847' || true";
+                + "echo '--- port 3847 ---'; ss -ltnp 2>/dev/null | grep ':3847' || netstat -ltnp 2>/dev/null | grep ':3847' || true; "
+                + "echo '--- established 3847 ---'; ss -tnp 2>/dev/null | grep ':3847' || true";
         return rootCommand(command, 12);
     }
 
@@ -164,7 +171,13 @@ public final class DiagnosticsExporter {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         java.lang.Process process = null;
         try {
-            process = new ProcessBuilder("su", "-c", command).redirectErrorStream(true).start();
+            String inner = shell(command);
+            String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                    + "echo namespace=pid1-nsenter; nsenter -t 1 -m sh -c " + inner
+                    + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                    + "echo namespace=pid1-toybox-nsenter; toybox nsenter -t 1 -m sh -c " + inner
+                    + "; else echo namespace=caller-fallback; sh -c " + inner + "; fi";
+            process = new ProcessBuilder("su", "-c", namespaced).redirectErrorStream(true).start();
             java.lang.Process p = process;
             Thread reader = new Thread(() -> {
                 try (InputStream in = p.getInputStream()) {
