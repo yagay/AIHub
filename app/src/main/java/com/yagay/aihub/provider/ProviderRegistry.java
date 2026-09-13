@@ -68,9 +68,7 @@ public final class ProviderRegistry {
                         strings(selectors, "send"),
                         strings(selectors, "newChat"),
                         strings(selectors, "stop"),
-                        strings(selectors, "attach"),
-                        strings(selectors, "userMessage"),
-                        strings(selectors, "assistantMessage")));
+                        strings(selectors, "attach")));
             }
             return out;
         } catch (Exception error) {
