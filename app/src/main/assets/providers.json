@@ -20,13 +20,13 @@
     "homeUrl": "https://claude.ai/new",
     "hosts": ["claude.ai"],
     "selectors": {
-      "input": ["div[contenteditable='true']", "textarea"],
+      "input": ["[data-testid='chat-input']", "div[contenteditable='true']", "textarea"],
       "send": ["button[aria-label*='Send']"],
       "newChat": ["a[href='/new']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-testid='user-message']", "[data-testid*='user-message']"],
-      "assistantMessage": ["[data-testid='assistant-message']", "[data-testid*='assistant-message']", "[data-is-streaming='true']"]
+      "userMessage": ["[data-testid='user-message']", "[data-testid='human-message']", "[data-testid='message-human']"],
+      "assistantMessage": [".font-claude-response", "[data-testid='ai-message']", "[data-testid='message-assistant']", "[data-is-streaming] .font-claude-response"]
     }
   },
   {
@@ -40,8 +40,8 @@
       "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"],
-      "userMessage": ["user-query", "user-query .query-text"],
-      "assistantMessage": ["model-response", "model-response .model-response-text"]
+      "userMessage": ["user-query .query-text", "user-query", ".user-query-content"],
+      "assistantMessage": ["model-response .model-response-text", "model-response"]
     }
   },
   {
@@ -50,13 +50,13 @@
     "homeUrl": "https://grok.com/",
     "hosts": ["grok.com"],
     "selectors": {
-      "input": ["textarea", "div[contenteditable='true']"],
-      "send": ["button[aria-label*='Send']"],
+      "input": ["[data-testid='chat-input']", "div.ProseMirror[role='textbox']", "textarea", "div[contenteditable='true']"],
+      "send": ["button[aria-label*='Send']", "button[type='submit']"],
       "newChat": ["a[href='/']", "button[aria-label*='New']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
-      "userMessage": ["[data-message-author-role='user']", "[data-testid*='user-message']"],
-      "assistantMessage": ["[data-message-author-role='assistant']", "[data-testid*='assistant-message']"]
+      "userMessage": ["[data-testid='user-message']", "[data-message-author-role='user']"],
+      "assistantMessage": ["[data-testid='assistant-message']", "[data-message-author-role='assistant']"]
     }
   },
   {
@@ -66,7 +66,7 @@
     "hosts": ["chat.deepseek.com"],
     "selectors": {
       "input": ["textarea", "div[contenteditable='true']"],
-      "send": ["button[aria-label*='Send']"],
+      "send": ["button[aria-label*='Send']", "button[type='submit']"],
       "newChat": ["button[aria-label*='New']", "a[href='/']"],
       "stop": ["button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
