@@ -14,9 +14,7 @@ public record ProviderSpec(
         List<String> sendSelectors,
         List<String> newChatSelectors,
         List<String> stopSelectors,
-        List<String> attachmentSelectors,
-        List<String> userMessageSelectors,
-        List<String> assistantMessageSelectors) {
+        List<String> attachmentSelectors) {
 
     public ProviderSpec {
         allowedHosts = copy(allowedHosts);
@@ -25,8 +23,6 @@ public record ProviderSpec(
         newChatSelectors = copy(newChatSelectors);
         stopSelectors = copy(stopSelectors);
         attachmentSelectors = copy(attachmentSelectors);
-        userMessageSelectors = copy(userMessageSelectors);
-        assistantMessageSelectors = copy(assistantMessageSelectors);
     }
 
     public boolean ownsUrl(String url) {
