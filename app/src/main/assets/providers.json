@@ -5,7 +5,7 @@
     "homeUrl": "https://chatgpt.com/",
     "hosts": ["chatgpt.com"],
     "selectors": {
-      "input": ["#prompt-textarea", "div#prompt-textarea[contenteditable='true']", "textarea"],
+      "input": ["#prompt-textarea", "[data-testid='prompt-textarea']", "div#prompt-textarea[contenteditable='true']", "textarea[name='prompt-textarea']", "textarea"],
       "send": ["button[data-testid='send-button']", "button[aria-label*='Send']"],
       "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
       "stop": ["button[data-testid='stop-button']", "button[aria-label*='Stop']"],
@@ -16,8 +16,8 @@
       "actions": [
         {"id":"history","label":"History","selectors":["button[data-testid='open-sidebar-button']","button[aria-label*='sidebar']","button[aria-label*='History']"],"keywords":["sidebar","history"]},
         {"id":"model","label":"Model","selectors":["button[data-testid='model-switcher-dropdown-button']","button[aria-label*='model']"],"keywords":["model","gpt"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Regenerate","pick":"last","selectors":["button[aria-label*='Regenerate']","button[aria-label*='Retry']","button[data-testid*='regenerate']"],"keywords":["regenerate","retry","try again"]},
+        {"id":"copy","label":"Copy","pick":"last","selectors":["button[data-testid='copy-turn-action-button']","button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
+        {"id":"retry","label":"Regenerate","pick":"last","selectors":["button[data-testid='regenerate-turn-action-button']","button[aria-label='Regenerate']","button[aria-label*='Regenerate']","button[aria-label*='Retry']"],"keywords":["regenerate","retry","try again"]},
         {"id":"account","label":"Account","selectors":["button[data-testid='profile-button']","button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
         {"id":"more","label":"More","selectors":["button[aria-label='More']","button[aria-label*='More']"],"keywords":["more"]}
       ]
@@ -29,10 +29,10 @@
     "homeUrl": "https://claude.ai/new",
     "hosts": ["claude.ai"],
     "selectors": {
-      "input": ["[data-testid='chat-input']", ".ProseMirror[contenteditable='true']", "div[contenteditable='true']", "textarea"],
-      "send": ["button[aria-label*='Send']", "button[type='submit']"],
+      "input": ["[data-testid='chat-input']", ".ProseMirror[contenteditable='true']", "div[contenteditable='true']", "fieldset textarea", "textarea"],
+      "send": ["button[aria-label='Send Message']", "button[aria-label*='Send']", "button[data-testid='send-button']", "button[type='submit']"],
       "newChat": ["a[href='/new']", "button[aria-label*='New']"],
-      "stop": ["button[aria-label*='Stop']"],
+      "stop": ["button[aria-label='Stop Response']", "button[aria-label*='Stop']"],
       "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
     },
     "ui": {
@@ -41,7 +41,7 @@
         {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
         {"id":"model","label":"Model","selectors":["button[data-testid*='model']","button[aria-label*='model']"],"keywords":["model","claude"]},
         {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Retry","pick":"last","selectors":["button[aria-label*='Retry']","button[aria-label*='Regenerate']"],"keywords":["retry","regenerate","try again"]},
+        {"id":"retry","label":"Retry","pick":"last","selectors":["button[aria-label='Retry']","button[aria-label*='Retry']","button[aria-label*='Regenerate']"],"keywords":["retry","regenerate","try again"]},
         {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
         {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
       ]
