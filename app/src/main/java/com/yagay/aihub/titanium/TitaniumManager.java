@@ -15,26 +15,31 @@ import java.util.concurrent.TimeUnit;
 /**
  * Root-side Titanium integration.
  *
- * Root stages/updates the unpacked extension inside Titanium's private data directory.
- * LSPosed injects --load-extension on every Titanium start when the module is enabled.
- * For devices where the LSPosed scope is not enabled yet, AIHub also performs a safe,
- * temporary chrome-command-line bootstrap only while starting Titanium itself.
+ * Titanium patches Chromium's DIR_EXTERNAL_EXTENSIONS to use DIR_USER_DATA/extensions.
+ * On Android DIR_USER_DATA is the app-specific app_chrome directory, so AIHub installs
+ * a stable CRX3 plus its standalone external-extension JSON into:
+ *   <Titanium dataDir>/app_chrome/extensions/
+ *
+ * Titanium then installs and persists the extension itself. No --load-extension or
+ * Chromium CommandLine hook is required.
  */
 public final class TitaniumManager {
     public interface Callback { void onReady(); void onError(Throwable error); }
 
     public static final String PACKAGE = "io.github.jqssun.helium";
-    public static final String EXTENSION_RELATIVE_PATH = "/files/aihub-extension";
     private static final String BUILD_ID_FILE = "AIHUB_BUILD_ID";
-    private static final String COMMAND_LINE = "/data/local/tmp/chrome-command-line";
+    private static final String EXTENSION_ID_FILE = "EXTENSION_ID";
+    private static final String CHROME_USER_DATA_RELATIVE = "/app_chrome";
+    private static final String EXTERNAL_EXTENSIONS_RELATIVE = "/app_chrome/extensions";
+    private static final String OLD_UNPACKED_RELATIVE = "/files/aihub-extension";
     private static final String[] PROVIDERS = {"chatgpt", "claude", "gemini", "deepseek", "grok"};
 
     private final Context context;
     private final Set<String> launched = new HashSet<>();
     private volatile boolean prepared;
-    private volatile boolean browserBootstrapped;
-    private String extensionDestination;
     private String titaniumDataDir;
+    private String externalExtensionsDir;
+    private String extensionId;
 
     public TitaniumManager(Context context) {
         this.context = context.getApplicationContext();
@@ -64,7 +69,11 @@ public final class TitaniumManager {
         }
 
         titaniumDataDir = resolveTitaniumDataDir(info);
-        extensionDestination = titaniumDataDir + EXTENSION_RELATIVE_PATH;
+        String uid = runSu("stat -c %u " + q(titaniumDataDir), 10).trim();
+        if (uid.isEmpty()) throw new IllegalStateException("无法读取 Titanium UID：" + titaniumDataDir);
+
+        ensureChromiumUserData(uid);
+        externalExtensionsDir = titaniumDataDir + EXTERNAL_EXTENSIONS_RELATIVE;
 
         File source = new File(context.getFilesDir(), "titanium-extension");
         delete(source);
@@ -74,39 +83,77 @@ public final class TitaniumManager {
         copyAssets("titanium-extension", source);
 
         String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();
+        extensionId = readAssetText("titanium-extension/" + EXTENSION_ID_FILE).trim();
         if (expectedBuild.isEmpty()) throw new IllegalStateException("APK 内扩展 build marker 缺失");
+        if (!extensionId.matches("[a-p]{32}")) {
+            throw new IllegalStateException("APK 内扩展 ID 无效：" + extensionId);
+        }
 
-        String uid = runSu("stat -c %u " + q(titaniumDataDir), 10).trim();
-        if (uid.isEmpty()) throw new IllegalStateException("无法读取 Titanium UID：" + titaniumDataDir);
+        File sourceCrx = new File(source, extensionId + ".crx");
+        File sourceJson = new File(source, extensionId + ".json");
+        if (!sourceCrx.isFile() || sourceCrx.length() < 16 || !sourceJson.isFile()) {
+            throw new IllegalStateException("APK 内缺少 Titanium external-extension CRX/JSON");
+        }
 
-        String installedBuild = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE)
-                + " 2>/dev/null || true", 8).trim();
-        if (!expectedBuild.equals(installedBuild)) {
-            String install = "rm -rf " + q(extensionDestination)
-                    + " && mkdir -p " + q(extensionDestination)
-                    + " && cp -R " + q(source.getAbsolutePath() + "/.") + " " + q(extensionDestination + "/")
-                    + " && chown -R " + uid + ":" + uid + " " + q(extensionDestination)
-                    + " && chmod -R u+rwX,go-rwx " + q(extensionDestination)
-                    + " && test -f " + q(extensionDestination + "/manifest.json")
-                    + " && test -f " + q(extensionDestination + "/" + BUILD_ID_FILE)
+        String buildMarker = externalExtensionsDir + "/" + extensionId + ".aihub-build";
+        String installedBuild = runSu("cat " + q(buildMarker) + " 2>/dev/null || true", 8).trim();
+        String installedCrx = externalExtensionsDir + "/" + extensionId + ".crx";
+        String installedJson = externalExtensionsDir + "/" + extensionId + ".json";
+        String installedFilesOk = runSu("[ -s " + q(installedCrx) + " ] && [ -s " + q(installedJson)
+                + " ] && echo yes || true", 5).trim();
+
+        if (!expectedBuild.equals(installedBuild) || !"yes".equals(installedFilesOk)) {
+            String install = "mkdir -p " + q(externalExtensionsDir)
+                    + " && cp " + q(sourceCrx.getAbsolutePath()) + " " + q(installedCrx)
+                    + " && cp " + q(sourceJson.getAbsolutePath()) + " " + q(installedJson)
+                    + " && cp " + q(new File(source, BUILD_ID_FILE).getAbsolutePath()) + " " + q(buildMarker)
+                    + " && chown " + uid + ":" + uid + " " + q(externalExtensionsDir)
+                    + " && chown " + uid + ":" + uid + " " + q(installedCrx) + " " + q(installedJson) + " " + q(buildMarker)
+                    + " && chmod 700 " + q(externalExtensionsDir)
+                    + " && chmod 600 " + q(installedCrx) + " " + q(installedJson) + " " + q(buildMarker)
+                    + " && rm -rf " + q(titaniumDataDir + OLD_UNPACKED_RELATIVE)
                     + " && am force-stop " + PACKAGE;
             runSu(install, 20);
-            browserBootstrapped = false;
             launched.clear();
         }
 
-        String installedCheck = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE), 8).trim();
-        if (!expectedBuild.equals(installedCheck)) {
-            throw new IllegalStateException("Root 已授权，但 Titanium 扩展写入校验失败：" + extensionDestination);
+        String installedCheck = runSu("cat " + q(buildMarker) + " 2>/dev/null || true", 8).trim();
+        String fileCheck = runSu("[ -s " + q(installedCrx) + " ] && [ -s " + q(installedJson)
+                + " ] && echo yes || true", 5).trim();
+        if (!expectedBuild.equals(installedCheck) || !"yes".equals(fileCheck)) {
+            throw new IllegalStateException("Root 已授权，但 Titanium External Extension 写入校验失败："
+                    + externalExtensionsDir);
         }
+
         prepared = true;
     }
 
-    /**
-     * ApplicationInfo.dataDir is normally correct, but on some ROMs PackageManager can return
-     * a path for user 0 even when the package was installed/initialized in another Android user.
-     * Resolve the directory from the filesystem under Root instead of assuming /data/user/0.
-     */
+    private void ensureChromiumUserData(String uid) throws Exception {
+        String userData = titaniumDataDir + CHROME_USER_DATA_RELATIVE;
+        String exists = runSu("[ -d " + q(userData) + " ] && echo yes || true", 5).trim();
+        if ("yes".equals(exists)) return;
+
+        int uidDerivedUser = android.os.Process.myUid() / 100000;
+        String currentUser = runSu("cmd activity get-current-user 2>/dev/null || am get-current-user 2>/dev/null || echo "
+                + uidDerivedUser, 5).trim();
+        if (currentUser.isEmpty() || !currentUser.matches("\\d+")) currentUser = String.valueOf(uidDerivedUser);
+
+        String init = "am start --user " + currentUser
+                + " -a android.intent.action.VIEW -d 'about:blank' -p " + PACKAGE
+                + " >/dev/null 2>&1 || monkey --user " + currentUser + " -p " + PACKAGE
+                + " -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true; sleep 2";
+        runSu(init, 8);
+
+        exists = runSu("[ -d " + q(userData) + " ] && echo yes || true", 5).trim();
+        if (!"yes".equals(exists)) {
+            // Chromium normally creates app_chrome itself. Create it only as a last resort,
+            // with Titanium's own UID and private permissions.
+            runSu("mkdir -p " + q(userData) + " && chown " + uid + ":" + uid + " " + q(userData)
+                    + " && chmod 700 " + q(userData), 8);
+        }
+    }
+
+    /** Resolve Titanium's app data directory for the current Android user under Root. */
     private String resolveTitaniumDataDir(ApplicationInfo info) throws Exception {
         int uidDerivedUser = android.os.Process.myUid() / 100000;
         String declared = info.dataDir == null ? "" : info.dataDir.trim();
@@ -118,23 +165,15 @@ public final class TitaniumManager {
         }
 
         StringBuilder probe = new StringBuilder();
-        if (!declared.isEmpty()) {
-            probe.append("for d in ").append(q(declared)).append(' ');
-        } else {
-            probe.append("for d in ");
-        }
+        if (!declared.isEmpty()) probe.append("for d in ").append(q(declared)).append(' ');
+        else probe.append("for d in ");
         probe.append(q("/data/user/" + currentUser + "/" + PACKAGE)).append(' ')
                 .append(q("/data/data/" + PACKAGE)).append("; do ")
-                .append("[ -d \"$d\" ] && { printf '%s' \"$d\"; exit 0; }; done; ")
-                .append("exit 0");
+                .append("[ -d \"$d\" ] && { printf '%s' \"$d\"; exit 0; }; done; exit 0");
 
         String found = runSu(probe.toString(), 8).trim();
-        if (!found.isEmpty()) {
-            return found;
-        }
+        if (!found.isEmpty()) return found;
 
-        // The package may have just been installed but never launched in this user. Start it once
-        // so Android/Chromium can initialize its credential-encrypted data directory, then retry.
         String init = "am start --user " + currentUser
                 + " -a android.intent.action.VIEW -d 'about:blank' -p " + PACKAGE
                 + " >/dev/null 2>&1 || monkey --user " + currentUser + " -p " + PACKAGE
@@ -142,12 +181,8 @@ public final class TitaniumManager {
         runSu(init, 8);
 
         found = runSu(probe.toString(), 8).trim();
-        if (!found.isEmpty()) {
-            return found;
-        }
+        if (!found.isEmpty()) return found;
 
-        // Last-resort diagnostic: find the package under any Android user. We do not silently use
-        // another user's private data because AIHub and Titanium could not communicate reliably.
         String anywhere = runSu("for d in /data/user/*/" + PACKAGE + "; do "
                 + "[ -d \"$d\" ] && printf '%s\\n' \"$d\"; done", 8).trim();
         if (!anywhere.isEmpty()) {
@@ -164,7 +199,6 @@ public final class TitaniumManager {
     private void assertRoot() throws Exception {
         String uid;
         try {
-            // The first request may wait for KernelSU/Magisk's approval dialog.
             uid = runSu("id -u", 30).trim();
         } catch (Exception error) {
             throw new IllegalStateException("无法获得 Root：请在 KernelSU/Magisk 中允许 AIHub。详情: "
@@ -183,38 +217,9 @@ public final class TitaniumManager {
                 synchronized (TitaniumManager.this) {
                     if (!launched.add(provider)) return;
                 }
-                String url = providerUrl(provider);
-                if (!browserBootstrapped) {
-                    bootstrapTitanium(url);
-                    browserBootstrapped = true;
-                } else {
-                    openProvider(url);
-                }
+                openProvider(providerUrl(provider));
             } catch (Throwable ignored) {}
         }, "AIHub-open-" + provider).start();
-    }
-
-    /**
-     * Temporary Root fallback for the first Titanium process start.
-     * The global Chromium command-line file is restored immediately after Titanium initializes,
-     * so other Chromium browsers are not left with AIHub's --load-extension switch.
-     */
-    private void bootstrapTitanium(String url) throws Exception {
-        String original = runSu("cat " + q(COMMAND_LINE) + " 2>/dev/null || true", 5).trim();
-        String merged = mergeLoadExtension(original, extensionDestination);
-        String backup = "/data/local/tmp/aihub-chrome-command-line-" + android.os.Process.myUid() + ".bak";
-
-        String command = "if [ -f " + q(COMMAND_LINE) + " ]; then cp -p " + q(COMMAND_LINE) + " " + q(backup)
-                + "; else rm -f " + q(backup) + "; fi"
-                + " ; printf %s " + q(merged) + " > " + q(COMMAND_LINE)
-                + " ; chmod 644 " + q(COMMAND_LINE)
-                + " ; am force-stop " + PACKAGE
-                + " ; am start -W -a android.intent.action.VIEW -d " + q(url) + " -p " + PACKAGE + " >/dev/null 2>&1 || true"
-                + " ; sleep 2"
-                + " ; if [ -f " + q(backup) + " ]; then mv " + q(backup) + " " + q(COMMAND_LINE)
-                + "; else rm -f " + q(COMMAND_LINE) + "; fi"
-                + " ; am start --activity-reorder-to-front -n com.yagay.aihub/com.yagay.aihub.app.MainActivity >/dev/null 2>&1 || true";
-        runSu(command, 15);
     }
 
     private void openProvider(String url) throws Exception {
@@ -223,14 +228,6 @@ public final class TitaniumManager {
                 + " ; sleep 1"
                 + " ; am start --activity-reorder-to-front -n com.yagay.aihub/com.yagay.aihub.app.MainActivity >/dev/null 2>&1 || true";
         runSu(command, 10);
-    }
-
-    private static String mergeLoadExtension(String original, String destination) {
-        String value = original == null ? "" : original.trim();
-        if (value.isEmpty()) value = "_";
-        value = value.replaceAll("\\s+--load-extension=(?:'[^']*'|\"[^\"]*\"|\\S*aihub-extension\\S*)", "").trim();
-        if (!value.startsWith("_")) value = "_ " + value;
-        return value + " --load-extension=" + destination;
     }
 
     private static boolean isProvider(String provider) {
