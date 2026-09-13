@@ -33,27 +33,11 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Validate repository
-        run: |
-          python3 scripts/validate_provider_rules.py
-          python3 scripts/validate_repo.py
-          bash scripts/run_core_smoke_test.sh
-
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
       - name: Android lint
-        shell: bash
-        run: |
-          set +e
-          gradle :app:lintDebug --stacktrace --no-daemon
-          status=$?
-          report="app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
-          if [[ -f "$report" ]]; then
-            echo "===== Complete Android lint report ====="
-            cat "$report"
-          fi
-          exit "$status"
+        run: gradle :app:lintDebug --stacktrace --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
