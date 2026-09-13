@@ -117,7 +117,7 @@ public final class LocalBroker implements Closeable {
             }
         } catch (Exception ignored) {
         }
-        return root.toString(2);
+        return root.toString();
     }
 
     private void handle(Socket socket) {
