@@ -1,4 +1,5 @@
 const BROKER = "ws://127.0.0.1:3847/bridge";
+const WORKER_MARKER = "AIHUB_BRIDGE_WORKER_V3";
 const ports = new Map();
 let socket = null;
 let reconnectTimer = null;
@@ -15,12 +16,24 @@ function send(message) {
   return true;
 }
 
+function hello(reason = "state") {
+  send({
+    type: "hello",
+    providers: availableProviders(),
+    version: chrome.runtime.getManifest().version,
+    worker: WORKER_MARKER,
+    reason,
+  });
+}
+
 function announceProviders() {
-  send({ type: "providers", providers: availableProviders() });
+  if (!send({ type: "providers", providers: availableProviders() })) {
+    connectBroker();
+  }
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer || availableProviders().length === 0) return;
+  if (reconnectTimer) return;
   const delay = reconnectDelay;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -35,21 +48,23 @@ function stopPing() {
 }
 
 function connectBroker() {
-  if (availableProviders().length === 0) return;
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
   try {
     socket = new WebSocket(BROKER);
   } catch (_) {
+    socket = null;
     scheduleReconnect();
     return;
   }
 
   socket.onopen = () => {
     reconnectDelay = 500;
-    send({ type: "hello", providers: availableProviders(), version: chrome.runtime.getManifest().version });
+    hello("socket-open");
     stopPing();
-    pingTimer = setInterval(() => send({ type: "ping" }), 20000);
+    pingTimer = setInterval(() => {
+      if (!send({ type: "ping" })) connectBroker();
+    }, 20000);
   };
 
   socket.onmessage = (event) => {
@@ -100,7 +115,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (!ports.has(provider)) ports.set(provider, new Set());
       ports.get(provider).add(port);
       connectBroker();
-      announceProviders();
+      hello("provider-connected");
       return;
     }
 
@@ -120,14 +135,9 @@ chrome.runtime.onConnect.addListener((port) => {
     ports.get(provider)?.delete(port);
     if (ports.get(provider)?.size === 0) ports.delete(provider);
     announceProviders();
-    if (availableProviders().length === 0) {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-      stopPing();
-      if (socket) {
-        try { socket.close(); } catch (_) {}
-        socket = null;
-      }
-    }
   });
 });
+
+chrome.runtime.onStartup.addListener(() => connectBroker());
+chrome.runtime.onInstalled.addListener(() => connectBroker());
+connectBroker();
