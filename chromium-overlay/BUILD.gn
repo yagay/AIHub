@@ -32,19 +32,14 @@ android_assets("aihub_assets") {
 
 android_library("aihub_core_java") {
   sources = [
-    "../aihub-core/src/main/java/com/yagay/aihub/core/AccountRegistry.java",
-    "../aihub-core/src/main/java/com/yagay/aihub/core/AiAccount.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/AiCapability.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/AiSession.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/AiSessionKey.java",
-    "../aihub-core/src/main/java/com/yagay/aihub/core/AiWorkspace.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/ProviderConfig.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/SessionManager.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/SessionState.java",
-    "../aihub-core/src/main/java/com/yagay/aihub/core/WorkspaceRegistry.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommand.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandBus.java",
-    "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandTarget.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/AiCommandType.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/command/CommandResult.java",
     "../aihub-core/src/main/java/com/yagay/aihub/core/provider/BuiltinProviders.java",
@@ -95,8 +90,7 @@ android_apk("aihub_apk") {
 }
 
 # Development convenience: build the WebEngine support provider together with AIHub.
-# WebEngine's client API is loaded from the WebView/WebEngine implementation; a local Chromium
-# checkout normally uses the support APK while iterating on a Chromium revision.
+# All direct upstream Chromium/WebEngine API usage is intentionally isolated to chromium-overlay.
 group("aihub_local") {
   deps = [
     ":aihub_apk",
