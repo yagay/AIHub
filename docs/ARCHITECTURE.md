@@ -1,61 +1,97 @@
-# Architecture
+# AIHub Architecture
 
-AIHub deliberately separates AI product logic from the browser engine.
+The rebuilt `main` branch has one Gradle module (`app`) and several small internal packages. The goal is to keep the codebase lightweight without mixing UI, website DOM details, account storage and WebView lifecycle code.
 
 ```text
-aihub-core
-  ProviderConfig / ProviderRegistry
-  SessionManager / AiCommandBus
-        ↓
-aihub-android
-  AiHubUiCoordinator
-  BrowserSessionRuntime
-  GenericDomScriptFactory
-  ProviderRuleLoader
-        ↓
-AiHubBrowserHost
-        ↓
-app
-  MainActivity
-  WebViewBrowserHost
-        ↓
+app/
+└── src/main/java/com/yagay/aihub/
+    ├── app/
+    │   └── MainActivity.java
+    ├── ui/
+    │   ├── MainController.java
+    │   └── MainScreen.java
+    ├── model/
+    │   ├── ProviderSpec.java
+    │   └── AccountProfile.java
+    ├── provider/
+    │   ├── AiProviderAdapter.java
+    │   ├── GenericWebProviderAdapter.java
+    │   └── ProviderRegistry.java
+    ├── data/
+    │   ├── AccountRepository.java
+    │   └── AppPreferences.java
+    ├── session/
+    │   ├── SessionKey.java
+    │   └── WebSessionManager.java
+    └── web/
+        ├── WebViewFactory.java
+        └── DomBridge.java
+```
+
+## Dependency direction
+
+```text
+MainActivity
+    ↓
+MainController
+    ↓
+MainScreen        ProviderRegistry        AccountRepository
+                        ↓
+                 AiProviderAdapter
+                        ↓
+              GenericWebProviderAdapter
+                        ↓
+                    DomBridge
+
+MainController
+    ↓
+WebSessionManager
+    ↓
+WebViewFactory
+    ↓
 Android System WebView
 ```
 
-## Stable layers
+Lower layers never depend on the UI.
 
-`aihub-core` is pure Java. It must not import Android, AndroidX, WebView or Chromium APIs.
+## Provider reuse
 
-`aihub-android` owns the AI-specific Android UI and generic website automation. It may use normal Android UI APIs but must not depend on concrete `WebView` or Chromium-internal classes.
+`AiProviderAdapter` is the stable provider contract. The current built-in providers all use `GenericWebProviderAdapter`, so they share the same send/new-chat/stop/app-mode implementation.
 
-## Browser adapter
+Most website changes should require editing only one `ProviderSpec` entry in `ProviderRegistry`.
 
-`WebViewBrowserHost` is the concrete browser adapter on `main`. It owns all `WebView`, `WebChromeClient`, `WebViewClient`, downloads, permissions, file chooser, popup and renderer-lifecycle behavior.
+If a provider later needs special behavior, add a dedicated adapter implementing `AiProviderAdapter`. Do not add provider-name conditionals to `MainController`, `MainScreen` or `WebSessionManager`.
 
-If a future browser engine is adopted, implement `AiHubBrowserHost` again instead of rewriting provider/session/UI logic.
+## WebView reuse
 
-## Provider sessions
+`WebViewFactory` is the only place where WebView defaults and security policy are configured. Any future WebView setting change therefore applies to every provider/account session automatically.
 
-AIHub intentionally has no account/workspace abstraction. Each Provider owns one retained browser page for the current app process. Website login identity remains website/WebView state.
+`WebSessionManager` retains a WebView for each `SessionKey(providerId, accountId)`. Switching between providers or accounts reuses that session instead of reloading it.
 
-Provider switching changes which retained page is visible; it does not create a separate browser engine profile per AI.
+## Multi-account isolation
 
-## Provider differences
+`AccountRepository` stores account labels and stable IDs only. A stable WebView profile name is derived from provider ID + account ID.
 
-Provider-specific differences belong in JSON rules under:
+When AndroidX WebKit reports `MULTI_PROFILE` support, `WebViewFactory` calls `WebViewCompat.setProfile()` before normal WebView use. This gives each provider/account combination separate website storage and cookies.
 
-```text
-aihub-android/src/main/assets/aihub/providers/
-```
+The app never stores website passwords.
 
-The generic DOM engine combines semantic discovery with selector fallbacks. Core/session/UI code must not branch on provider names.
+## Native APP mode
 
-## Archived Chromium implementation
+The official website remains the service/session layer. `DomBridge` hides common website navigation/composer UI only after it detects a usable chat composer. Hidden elements remain in the DOM so native AIHub controls can still invoke the site's real actions.
 
-The previous full Chromium source-overlay implementation is preserved on Git branch:
+`WEB` mode removes that transform and exposes the normal website for login, verification, settings and unsupported features.
 
-```text
-archive/chromium-overlay
-```
+## Maintenance rules
 
-It is intentionally absent from `main` so normal Android builds remain small and fast.
+- Website selectors belong in `ProviderSpec`.
+- Cross-provider DOM logic belongs in `DomBridge`.
+- Provider exceptions belong in a provider adapter.
+- WebView settings belong in `WebViewFactory`.
+- Session switching belongs in `WebSessionManager`.
+- Account persistence belongs in `AccountRepository`.
+- UI layout belongs in `MainScreen`.
+- UI/business coordination belongs in `MainController`.
+- `MainActivity` should stay thin.
+
+Following these boundaries keeps future updates localized and avoids maintaining five separate implementations of the same feature.
