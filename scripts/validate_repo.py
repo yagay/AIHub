@@ -26,6 +26,15 @@ for required in (
     if required not in build:
         errors.append(f"BUILD.gn is missing required AIHub source/asset: {required}")
 
+for required_doc in (
+    "docs/ARCHITECTURE.md",
+    "docs/BROWSER_CAPABILITIES.md",
+    "docs/CHROMIUM_INTEGRATION.md",
+    "docs/INTEGRATION_TEST_CHECKLIST.md",
+):
+    if not (ROOT / required_doc).is_file():
+        errors.append(f"Missing architecture/integration document: {required_doc}")
+
 layout = (ROOT / "chromium-overlay/res/layout/aihub_activity_main.xml").read_text(encoding="utf-8")
 strings_xml = ET.parse(ROOT / "chromium-overlay/res/values/strings.xml")
 strings = {node.attrib["name"] for node in strings_xml.getroot().findall("string")}
@@ -47,6 +56,23 @@ for rid in sorted(set(re.findall(r'(?<!android\.)R\.id\.([A-Za-z0-9_]+)', shell_
 manifest = ET.parse(ROOT / "chromium-overlay/AndroidManifest.xml")
 manifest_root = manifest.getroot()
 android_ns = "{http://schemas.android.com/apk/res/android}"
+
+permissions = {
+    node.attrib.get(android_ns + "name", "")
+    for node in manifest_root.findall("uses-permission")
+}
+for permission in (
+    "android.permission.INTERNET",
+    "android.permission.CAMERA",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.POST_NOTIFICATIONS",
+):
+    if permission not in permissions:
+        errors.append(f"Browser capability permission missing from manifest: {permission}")
+
 components = {}
 for tag in ("activity", "service"):
     for node in manifest_root.findall(f".//{tag}"):
@@ -104,19 +130,26 @@ for root in (core_root, java_root, api_root):
             if forbidden in text:
                 errors.append(f"Provider-only source still contains {forbidden}: {path.relative_to(ROOT)}")
 
-# Direct Chromium/WebEngine Java API usage is allowed in exactly one file. WebEngineSessionRuntime
-# is deliberately API-neutral so normal AIHub changes do not depend on an upstream Chromium revision.
+# Direct Chromium/WebEngine Java API usage is allowed in exactly one file.
 for java_file in java_root.glob("*.java"):
     text = java_file.read_text(encoding="utf-8")
     if "org.chromium.webengine" in text and java_file.name != "AiWebEngineHost.java":
-        errors.append(
-            f"Direct WebEngine import leaked outside AiWebEngineHost: {java_file.name}")
+        errors.append(f"Direct WebEngine import leaked outside AiWebEngineHost: {java_file.name}")
 
 runtime_source = (java_root / "WebEngineSessionRuntime.java").read_text(encoding="utf-8")
 if "org.chromium.webengine" in runtime_source:
     errors.append("WebEngineSessionRuntime must remain independent from Chromium Java API types")
-if "currentActiveTab" not in (java_root / "AiWebEngineHost.java").read_text(encoding="utf-8"):
-    errors.append("AiWebEngineHost must resolve Chromium's active tab at operation time")
+
+host_source = (java_root / "AiWebEngineHost.java").read_text(encoding="utf-8")
+for required_host_pattern in (
+    "currentActiveTab",
+    "manager.getActiveTab()",
+    "Map<String, ListenableFuture<TabManager>>",
+):
+    if required_host_pattern not in host_source:
+        errors.append(f"AiWebEngineHost missing active-tab invariant: {required_host_pattern}")
+if "Map<String, ListenableFuture<Tab>>" in host_source:
+    errors.append("AiWebEngineHost must not permanently cache the provider's first Tab")
 
 install_script = (ROOT / "scripts/install_aihub_local.sh").read_text(encoding="utf-8")
 if "AiHubShellActivity" in install_script:
