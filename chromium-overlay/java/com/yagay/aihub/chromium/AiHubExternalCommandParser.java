@@ -31,8 +31,11 @@ public final class AiHubExternalCommandParser {
             return null;
         }
 
+        // Deep links are intentionally user-mediated by AiHubEntryActivity and therefore carry no
+        // reusable client secret in the URL. Unattended automation must use token-gated Intent
+        // extras or Binder instead.
         if (Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
-            return parseDeepLink(intent.getData(), expectedClientToken);
+            return parseDeepLink(intent.getData());
         }
 
         if (isPrivateAction(action) && !tokenMatches(
@@ -73,23 +76,30 @@ public final class AiHubExternalCommandParser {
         return null;
     }
 
-    private static AiCommand parseDeepLink(Uri uri, String expectedClientToken) {
+    private static AiCommand parseDeepLink(Uri uri) {
         if (!AiHubContract.DEEP_LINK_SCHEME.equals(uri.getScheme())) return null;
-        if (!tokenMatches(uri.getQueryParameter("token"), expectedClientToken)) return null;
 
         String command = uri.getHost();
-        if (command == null && !uri.getPathSegments().isEmpty()) command = uri.getPathSegments().get(0);
+        if ((command == null || command.isBlank()) && !uri.getPathSegments().isEmpty()) {
+            command = uri.getPathSegments().get(0);
+        }
         String provider = uri.getQueryParameter("provider");
         String account = uri.getQueryParameter("account");
         String workspace = uri.getQueryParameter("workspace");
 
         if ("send".equals(command)) {
-            return AiCommand.sendTo(provider, account, workspace, uri.getQueryParameter("text"));
+            String text = uri.getQueryParameter("text");
+            if (text == null || text.isBlank()) return null;
+            return AiCommand.sendTo(provider, account, workspace, text);
         }
-        if ("switch".equals(command)) return AiCommand.switchTo(provider, account, workspace);
+        if ("switch".equals(command)) {
+            if ((provider == null || provider.isBlank())
+                    && (account == null || account.isBlank())
+                    && (workspace == null || workspace.isBlank())) return null;
+            return AiCommand.switchTo(provider, account, workspace);
+        }
         if ("new-chat".equals(command)) return AiCommand.simple(AiCommandType.NEW_CHAT);
         if ("stop".equals(command)) return AiCommand.simple(AiCommandType.STOP);
-        if ("attach".equals(command)) return AiCommand.attach(List.of());
         if ("back".equals(command)) return AiCommand.simple(AiCommandType.BACK);
         if ("forward".equals(command)) return AiCommand.simple(AiCommandType.FORWARD);
         if ("reload".equals(command)) return AiCommand.simple(AiCommandType.RELOAD);
