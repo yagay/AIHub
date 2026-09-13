@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AIHub Titanium Bridge",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Connects AIHub to logged-in AI websites in Titanium Browser without provider API keys.",
   "permissions": ["tabs", "scripting"],
   "host_permissions": [
