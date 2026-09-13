@@ -102,6 +102,9 @@ public final class ProviderRegistry {
             if (!seen.add(action.id())) {
                 throw new IllegalStateException("Duplicate APP action " + action.id() + " for " + spec.id());
             }
+            if (!action.pick().equals("first") && !action.pick().equals("last")) {
+                throw new IllegalStateException("Invalid APP action pick " + action.pick() + " for " + spec.id());
+            }
             if (action.label().isBlank() || (action.selectors().isEmpty() && action.keywords().isEmpty())) {
                 throw new IllegalStateException("Incomplete APP action " + action.id() + " for " + spec.id());
             }
@@ -119,6 +122,7 @@ public final class ProviderRegistry {
             out.add(new ProviderAction(
                     item.optString("id", "").trim(),
                     item.optString("label", "").trim(),
+                    item.optString("pick", "first").trim(),
                     strings(item, "selectors"),
                     strings(item, "keywords")));
         }
