@@ -2,6 +2,7 @@ package com.yagay.aihub.provider;
 
 import android.content.Context;
 
+import com.yagay.aihub.model.ProviderAction;
 import com.yagay.aihub.model.ProviderSpec;
 
 import org.json.JSONArray;
@@ -59,6 +60,7 @@ public final class ProviderRegistry {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject item = array.getJSONObject(i);
                 JSONObject selectors = item.optJSONObject("selectors");
+                JSONObject ui = item.optJSONObject("ui");
                 out.add(new ProviderSpec(
                         item.getString("id").trim(),
                         item.getString("name").trim(),
@@ -68,7 +70,9 @@ public final class ProviderRegistry {
                         strings(selectors, "send"),
                         strings(selectors, "newChat"),
                         strings(selectors, "stop"),
-                        strings(selectors, "attach")));
+                        strings(selectors, "attach"),
+                        strings(ui, "hide"),
+                        actions(ui)));
             }
             return out;
         } catch (Exception error) {
@@ -90,6 +94,35 @@ public final class ProviderRegistry {
         if (spec.inputSelectors().isEmpty()) {
             throw new IllegalStateException("Provider has no input selector: " + spec.id());
         }
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (ProviderAction action : spec.appActions()) {
+            if (!action.id().matches("[a-z0-9][a-z0-9_-]*")) {
+                throw new IllegalStateException("Invalid APP action id " + action.id() + " for " + spec.id());
+            }
+            if (!seen.add(action.id())) {
+                throw new IllegalStateException("Duplicate APP action " + action.id() + " for " + spec.id());
+            }
+            if (action.label().isBlank() || (action.selectors().isEmpty() && action.keywords().isEmpty())) {
+                throw new IllegalStateException("Incomplete APP action " + action.id() + " for " + spec.id());
+            }
+        }
+    }
+
+    private static List<ProviderAction> actions(JSONObject ui) {
+        if (ui == null) return List.of();
+        JSONArray array = ui.optJSONArray("actions");
+        if (array == null) return List.of();
+        List<ProviderAction> out = new ArrayList<>();
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject item = array.optJSONObject(i);
+            if (item == null) continue;
+            out.add(new ProviderAction(
+                    item.optString("id", "").trim(),
+                    item.optString("label", "").trim(),
+                    strings(item, "selectors"),
+                    strings(item, "keywords")));
+        }
+        return List.copyOf(out);
     }
 
     private static List<String> strings(JSONObject object, String key) {
