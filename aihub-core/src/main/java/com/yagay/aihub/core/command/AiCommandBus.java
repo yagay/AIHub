@@ -25,6 +25,7 @@ public final class AiCommandBus {
                 case NEW_CHAT -> sessions.newChat();
                 case STOP -> sessions.stop();
                 case ATTACH -> sessions.attach(command.attachments());
+                case ATTACH_AND_SEND -> sessions.attachAndSend(command.attachments(), command.text());
                 case BACK -> sessions.back();
                 case FORWARD -> sessions.forward();
                 case RELOAD -> sessions.reload();
