@@ -24,7 +24,7 @@ public final class AiHubChromeHook {
         if (existing != null && existing.get() != null) return;
 
         AiHubChromeBridge bridge = new AiHubChromeBridge(activity);
-        AiHubUiCoordinator coordinator = AiHubUiCoordinator.attachDefault(bridge);
+        AiHubUiCoordinator coordinator = AiHubUiCoordinator.attachConfigured(bridge);
         COORDINATORS.put(activity, new WeakReference<>(coordinator));
     }
 }
