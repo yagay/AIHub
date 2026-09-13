@@ -13,14 +13,8 @@ public interface SessionRuntime {
     void sendText(AiSessionKey key, String text);
     void newChat(AiSessionKey key);
     void stop(AiSessionKey key);
-
-    /**
-     * Attaches files when concrete URI values are supplied. An empty list means "open the current
-     * site's native file chooser"; this keeps the common core independent from Chromium's chooser
-     * implementation.
-     */
     void attach(AiSessionKey key, List<String> uriStrings);
-
+    void attachAndSend(AiSessionKey key, List<String> uriStrings, String text);
     void back(AiSessionKey key);
     void forward(AiSessionKey key);
     void reload(AiSessionKey key);
