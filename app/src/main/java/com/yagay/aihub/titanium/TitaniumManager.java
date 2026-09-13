@@ -52,38 +52,68 @@ public final class TitaniumManager {
 
     public synchronized void prepare() throws Exception {
         if (prepared) return;
-        ApplicationInfo info = context.getPackageManager().getApplicationInfo(PACKAGE, 0);
+
+        assertRoot();
+
+        ApplicationInfo info;
+        try {
+            info = context.getPackageManager().getApplicationInfo(PACKAGE, 0);
+        } catch (Exception error) {
+            throw new IllegalStateException("Titanium Browser 未安装（需要包名 " + PACKAGE + "）", error);
+        }
         if (info.dataDir == null || info.dataDir.trim().isEmpty()) {
-            throw new IllegalStateException("Cannot resolve Titanium data directory");
+            throw new IllegalStateException("无法解析 Titanium 数据目录");
         }
         extensionDestination = info.dataDir + EXTENSION_RELATIVE_PATH;
 
         File source = new File(context.getFilesDir(), "titanium-extension");
         delete(source);
         if (!source.mkdirs() && !source.isDirectory()) {
-            throw new IllegalStateException("Cannot create extension staging directory");
+            throw new IllegalStateException("无法创建扩展暂存目录");
         }
         copyAssets("titanium-extension", source);
 
         String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();
-        if (expectedBuild.isEmpty()) throw new IllegalStateException("Extension build marker missing");
+        if (expectedBuild.isEmpty()) throw new IllegalStateException("APK 内扩展 build marker 缺失");
 
-        String uid = runSu("stat -c %u " + q(info.dataDir), 8).trim();
-        if (uid.isEmpty()) throw new IllegalStateException("Cannot resolve Titanium UID");
+        String uid = runSu("stat -c %u " + q(info.dataDir), 10).trim();
+        if (uid.isEmpty()) throw new IllegalStateException("无法读取 Titanium UID");
 
-        String installedBuild = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE) + " 2>/dev/null || true", 5).trim();
+        String installedBuild = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE)
+                + " 2>/dev/null || true", 8).trim();
         if (!expectedBuild.equals(installedBuild)) {
             String install = "rm -rf " + q(extensionDestination)
                     + " && mkdir -p " + q(extensionDestination)
                     + " && cp -R " + q(source.getAbsolutePath() + "/.") + " " + q(extensionDestination + "/")
                     + " && chown -R " + uid + ":" + uid + " " + q(extensionDestination)
                     + " && chmod -R u+rwX,go-rwx " + q(extensionDestination)
+                    + " && test -f " + q(extensionDestination + "/manifest.json")
+                    + " && test -f " + q(extensionDestination + "/" + BUILD_ID_FILE)
                     + " && am force-stop " + PACKAGE;
-            runSu(install, 15);
+            runSu(install, 20);
             browserBootstrapped = false;
             launched.clear();
         }
+
+        String installedCheck = runSu("cat " + q(extensionDestination + "/" + BUILD_ID_FILE), 8).trim();
+        if (!expectedBuild.equals(installedCheck)) {
+            throw new IllegalStateException("Root 已授权，但 Titanium 扩展写入校验失败");
+        }
         prepared = true;
+    }
+
+    private void assertRoot() throws Exception {
+        String uid;
+        try {
+            // The first request may wait for KernelSU/Magisk's approval dialog.
+            uid = runSu("id -u", 30).trim();
+        } catch (Exception error) {
+            throw new IllegalStateException("无法获得 Root：请在 KernelSU/Magisk 中允许 AIHub。详情: "
+                    + error.getMessage(), error);
+        }
+        if (!"0".equals(uid)) {
+            throw new IllegalStateException("Root 被拒绝或 su 未返回 uid 0（返回: " + uid + "）");
+        }
     }
 
     public synchronized void launchProvider(String provider) {
@@ -178,7 +208,7 @@ public final class TitaniumManager {
             }
             return;
         }
-        if (!target.exists() && !target.mkdirs()) throw new IllegalStateException("Cannot create " + target);
+        if (!target.exists() && !target.mkdirs()) throw new IllegalStateException("无法创建 " + target);
         for (String child : children) copyAssets(path + "/" + child, new File(target, child));
     }
 
@@ -192,7 +222,13 @@ public final class TitaniumManager {
     private static String runSu(String command, int timeoutSeconds) throws Exception {
         ProcessBuilder builder = new ProcessBuilder("su", "-c", command);
         builder.redirectErrorStream(true);
-        java.lang.Process process = builder.start();
+        java.lang.Process process;
+        try {
+            process = builder.start();
+        } catch (Exception error) {
+            throw new IllegalStateException("系统找不到 su 命令", error);
+        }
+
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         Thread reader = new Thread(() -> {
             try (InputStream in = process.getInputStream()) {
@@ -204,11 +240,13 @@ public final class TitaniumManager {
         reader.start();
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly();
-            throw new IllegalStateException("Root command timed out");
+            throw new IllegalStateException("Root 命令等待超时");
         }
         reader.join(1000);
         String text = new String(output.toByteArray(), StandardCharsets.UTF_8);
-        if (process.exitValue() != 0) throw new IllegalStateException("Root failed: " + text.trim());
+        if (process.exitValue() != 0) {
+            throw new IllegalStateException("su exit=" + process.exitValue() + ": " + text.trim());
+        }
         return text;
     }
 
