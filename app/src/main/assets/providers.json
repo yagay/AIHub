@@ -3,55 +3,75 @@
     "id": "chatgpt",
     "name": "ChatGPT",
     "homeUrl": "https://chatgpt.com/",
+    "hosts": ["chatgpt.com"],
     "selectors": {
       "input": ["#prompt-textarea", "textarea"],
       "send": ["button[data-testid='send-button']", "button[aria-label*='Send']"],
       "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
-      "stop": ["button[aria-label*='Stop']"]
+      "stop": ["button[aria-label*='Stop']", "button[data-testid='stop-button']"],
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
+      "userMessage": ["[data-message-author-role='user']"],
+      "assistantMessage": ["[data-message-author-role='assistant']"]
     }
   },
   {
     "id": "claude",
     "name": "Claude",
     "homeUrl": "https://claude.ai/new",
+    "hosts": ["claude.ai"],
     "selectors": {
       "input": ["div[contenteditable='true']", "textarea"],
       "send": ["button[aria-label*='Send']"],
       "newChat": ["a[href='/new']", "button[aria-label*='New']"],
-      "stop": ["button[aria-label*='Stop']"]
+      "stop": ["button[aria-label*='Stop']"],
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
+      "userMessage": ["[data-testid='user-message']", "[data-testid*='user-message']"],
+      "assistantMessage": ["[data-testid='assistant-message']", "[data-testid*='assistant-message']", "[data-is-streaming='true']"]
     }
   },
   {
     "id": "gemini",
     "name": "Gemini",
     "homeUrl": "https://gemini.google.com/app",
+    "hosts": ["gemini.google.com"],
     "selectors": {
       "input": [".ql-editor[contenteditable='true']", "div[contenteditable='true']", "textarea"],
       "send": ["button[aria-label*='Send']", "button[aria-label*='submit']"],
       "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
-      "stop": ["button[aria-label*='Stop']"]
+      "stop": ["button[aria-label*='Stop']"],
+      "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"],
+      "userMessage": ["user-query", "user-query .query-text"],
+      "assistantMessage": ["model-response", "model-response .model-response-text"]
     }
   },
   {
     "id": "grok",
     "name": "Grok",
     "homeUrl": "https://grok.com/",
+    "hosts": ["grok.com"],
     "selectors": {
       "input": ["textarea", "div[contenteditable='true']"],
       "send": ["button[aria-label*='Send']"],
       "newChat": ["a[href='/']", "button[aria-label*='New']"],
-      "stop": ["button[aria-label*='Stop']"]
+      "stop": ["button[aria-label*='Stop']"],
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
+      "userMessage": ["[data-message-author-role='user']", "[data-testid*='user-message']"],
+      "assistantMessage": ["[data-message-author-role='assistant']", "[data-testid*='assistant-message']"]
     }
   },
   {
     "id": "deepseek",
     "name": "DeepSeek",
     "homeUrl": "https://chat.deepseek.com/",
+    "hosts": ["chat.deepseek.com"],
     "selectors": {
       "input": ["textarea", "div[contenteditable='true']"],
       "send": ["button[aria-label*='Send']"],
       "newChat": ["button[aria-label*='New']", "a[href='/']"],
-      "stop": ["button[aria-label*='Stop']"]
+      "stop": ["button[aria-label*='Stop']"],
+      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"],
+      "userMessage": ["[data-message-author-role='user']", "[data-role='user']"],
+      "assistantMessage": ["[data-message-author-role='assistant']", "[data-role='assistant']"]
     }
   }
 ]
