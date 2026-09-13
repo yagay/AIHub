@@ -47,4 +47,4 @@ Do not add `if (provider == CHATGPT)` to UI/session/account code. Provider-speci
 
 ## Current status
 
-This archive is the architecture/core starter, not a prebuilt APK. A runnable APK requires integrating the `chromium-overlay` host adapter into a Chromium checkout and building the WebEngine shell/app with Chromium's GN/Ninja toolchain.
+The repository now also contains a first Android shell source layer under `chromium-overlay/`: unified provider switching, multi-account profile creation, persisted account metadata, a shared composer, and external Intent/deep-link command entry points. It is still intended to be built inside a Chromium checkout with GN/Ninja rather than as a standalone Gradle APK. See `docs/SHELL_MVP.md`.
