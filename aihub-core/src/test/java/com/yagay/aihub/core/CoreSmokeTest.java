@@ -59,12 +59,16 @@ public final class CoreSmokeTest {
         check(bus.execute(AiCommand.simple(AiCommandType.FORWARD)).success(), "forward");
         check(bus.execute(AiCommand.simple(AiCommandType.RELOAD)).success(), "reload");
         check(bus.execute(AiCommand.attach(List.of("content://example/a.pdf"))).success(), "attach");
+        check(bus.execute(AiCommand.attachAndSend(
+                List.of("content://example/b.png"), "describe this image")).success(), "attach and send");
 
         check(runtime.events().stream().anyMatch(e -> e.startsWith("send:chatgpt:gpt_personal:hello")), "send event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("back:claude:claude_work")), "back event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("forward:claude:claude_work")), "forward event");
         check(runtime.events().stream().anyMatch(e -> e.startsWith("reload:claude:claude_work")), "reload event");
         check(runtime.events().stream().anyMatch(e -> e.equals("attach:claude:claude_work:1")), "attach event");
+        check(runtime.events().stream().anyMatch(e -> e.equals(
+                "attachAndSend:claude:claude_work:1:describe this image")), "attach and send event");
 
         System.out.println("AIHub core smoke test passed");
         runtime.events().forEach(System.out::println);
