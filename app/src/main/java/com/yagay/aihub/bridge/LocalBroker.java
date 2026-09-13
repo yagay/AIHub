@@ -22,8 +22,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /** Loopback-only IPC. It never calls an AI provider API; Titanium content scripts do the web work. */
@@ -31,13 +31,15 @@ public final class LocalBroker implements Closeable {
     public interface ProviderLauncher { void launch(String provider); }
 
     private static final int PORT = 3847;
-    private static final Map<String, String> MODEL_TO_PROVIDER = Map.of(
-            "chatgpt-web", "chatgpt",
-            "claude-web", "claude",
-            "gemini-web", "gemini",
-            "deepseek-web", "deepseek",
-            "grok-web", "grok"
-    );
+    private static final Map<String, String> MODEL_TO_PROVIDER = new HashMap<>();
+
+    static {
+        MODEL_TO_PROVIDER.put("chatgpt-web", "chatgpt");
+        MODEL_TO_PROVIDER.put("claude-web", "claude");
+        MODEL_TO_PROVIDER.put("gemini-web", "gemini");
+        MODEL_TO_PROVIDER.put("deepseek-web", "deepseek");
+        MODEL_TO_PROVIDER.put("grok-web", "grok");
+    }
 
     private final ProviderLauncher launcher;
     private final ExecutorService workers = Executors.newCachedThreadPool();
@@ -66,7 +68,9 @@ public final class LocalBroker implements Closeable {
     }
 
     private void handle(Socket socket) {
-        try (socket; BufferedInputStream in = new BufferedInputStream(socket.getInputStream()); BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
+        try (Socket ignored = socket;
+             BufferedInputStream in = new BufferedInputStream(socket.getInputStream());
+             BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
             Request request = readRequest(in);
             if (request == null) return;
 
@@ -136,7 +140,7 @@ public final class LocalBroker implements Closeable {
             synchronized (lock) { pending.remove(id); }
         }
 
-        if (!result.error.isEmpty()) {
+        if (result.error.length() > 0) {
             writeJson(out, 502, new JSONObject().put("error", new JSONObject().put("message", result.error)));
             return;
         }
@@ -188,7 +192,9 @@ public final class LocalBroker implements Closeable {
         for (String part : query.split("&")) {
             if (!part.startsWith("providers=")) continue;
             String raw = part.substring("providers=".length());
-            for (String provider : raw.split(",")) if (!provider.isBlank()) values.add(provider);
+            for (String provider : raw.split(",")) {
+                if (provider != null && provider.trim().length() > 0) values.add(provider.trim());
+            }
         }
         return values;
     }
@@ -202,7 +208,7 @@ public final class LocalBroker implements Closeable {
             String role = message.optString("role", "user");
             Object content = message.opt("content");
             String value = content instanceof String ? (String) content : String.valueOf(content == null ? "" : content);
-            if (value.isBlank()) continue;
+            if (value.trim().length() == 0) continue;
             text.append(role.toUpperCase()).append(": ").append(value).append("\n\n");
         }
         text.append("Answer the latest USER message while respecting the conversation above.");
@@ -211,20 +217,26 @@ public final class LocalBroker implements Closeable {
 
     private static Request readRequest(InputStream in) throws Exception {
         String first = readLine(in);
-        if (first == null || first.isBlank()) return null;
+        if (first == null || first.trim().length() == 0) return null;
         String[] parts = first.split(" ", 3);
         if (parts.length < 2) return null;
         int length = 0;
         String line;
-        while ((line = readLine(in)) != null && !line.isEmpty()) {
+        while ((line = readLine(in)) != null && line.length() > 0) {
             int colon = line.indexOf(':');
             if (colon > 0 && "content-length".equalsIgnoreCase(line.substring(0, colon).trim())) {
                 length = Integer.parseInt(line.substring(colon + 1).trim());
             }
         }
-        byte[] body = in.readNBytes(length);
+        byte[] body = new byte[length];
+        int offset = 0;
+        while (offset < length) {
+            int count = in.read(body, offset, length - offset);
+            if (count < 0) break;
+            offset += count;
+        }
         URI uri = URI.create(parts[1]);
-        return new Request(parts[0], uri.getPath(), uri.getRawQuery(), new String(body, StandardCharsets.UTF_8));
+        return new Request(parts[0], uri.getPath(), uri.getRawQuery(), new String(body, 0, offset, StandardCharsets.UTF_8));
     }
 
     private static String readLine(InputStream in) throws Exception {
@@ -235,7 +247,7 @@ public final class LocalBroker implements Closeable {
             if (b != '\r') out.write(b);
         }
         if (b < 0 && out.size() == 0) return null;
-        return out.toString(StandardCharsets.UTF_8);
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private static void writeJson(OutputStream out, int status, JSONObject json) throws Exception {
@@ -265,9 +277,39 @@ public final class LocalBroker implements Closeable {
         workers.shutdownNow();
     }
 
-    private record Request(String method, String path, String query, String body) {}
-    private record Result(String response, String error) {}
-    private record Command(String id, String provider, String prompt) {
-        JSONObject toJson() { return new JSONObject().put("id", id).put("provider", provider).put("prompt", prompt); }
+    private static final class Request {
+        final String method;
+        final String path;
+        final String query;
+        final String body;
+        Request(String method, String path, String query, String body) {
+            this.method = method;
+            this.path = path;
+            this.query = query;
+            this.body = body;
+        }
+    }
+
+    private static final class Result {
+        final String response;
+        final String error;
+        Result(String response, String error) {
+            this.response = response;
+            this.error = error;
+        }
+    }
+
+    private static final class Command {
+        final String id;
+        final String provider;
+        final String prompt;
+        Command(String id, String provider, String prompt) {
+            this.id = id;
+            this.provider = provider;
+            this.prompt = prompt;
+        }
+        JSONObject toJson() {
+            return new JSONObject().put("id", id).put("provider", provider).put("prompt", prompt);
+        }
     }
 }
