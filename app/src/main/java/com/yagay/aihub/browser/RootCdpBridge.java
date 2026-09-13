@@ -1,6 +1,7 @@
 package com.yagay.aihub.browser;
 
 import android.content.Context;
+import android.content.Intent;
 import android.os.Process;
 
 import java.io.ByteArrayOutputStream;
@@ -18,6 +19,13 @@ import java.util.concurrent.TimeUnit;
 public final class RootCdpBridge {
     public static final int PORT = 9222;
     private static final String ASSET = "native/aihub_cdp_forwarder";
+    private static final String[] BROWSER_PACKAGES = {
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.chrome.dev",
+            "org.chromium.chrome",
+            "org.cromite.cromite"
+    };
 
     private final Context context;
 
@@ -27,11 +35,20 @@ public final class RootCdpBridge {
 
     public synchronized void ensureStarted() throws Exception {
         if (portOpen()) return;
+
         String socketName = discoverSocket();
+        if (socketName == null) {
+            launchBrowser();
+            long socketDeadline = System.currentTimeMillis() + 6000L;
+            while (socketName == null && System.currentTimeMillis() < socketDeadline) {
+                Thread.sleep(250L);
+                socketName = discoverSocket();
+            }
+        }
         if (socketName == null) {
             throw new BrowserStateException(
                     "browser_not_ready",
-                    "Chrome DevTools socket is not available. Open Chrome once, keep USB debugging enabled, then return to AIHub.");
+                    "Chrome DevTools socket is not available. Open a supported Chromium browser and enable the AIHub LSPosed scope if Root alone cannot expose CDP.");
         }
 
         File local = extractForwarder();
@@ -43,14 +60,26 @@ public final class RootCdpBridge {
                 + " >" + q(log) + " 2>&1 </dev/null &)";
         runSu(command, 10);
 
-        long deadline = System.currentTimeMillis() + 5000;
+        long deadline = System.currentTimeMillis() + 5000L;
         while (System.currentTimeMillis() < deadline) {
             if (portOpen()) return;
-            Thread.sleep(100);
+            Thread.sleep(100L);
         }
         throw new BrowserStateException(
                 "root_bridge_failed",
                 "Root CDP bridge could not connect to Chrome. Check KernelSU root permission for AIHub.");
+    }
+
+    private void launchBrowser() {
+        for (String packageName : BROWSER_PACKAGES) {
+            try {
+                Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
+                if (launch == null) continue;
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(launch);
+                return;
+            } catch (Exception ignored) {}
+        }
     }
 
     private String discoverSocket() throws Exception {
@@ -110,7 +139,7 @@ public final class RootCdpBridge {
             process.destroyForcibly();
             throw new BrowserStateException("root_timeout", "Root command timed out");
         }
-        reader.join(1000);
+        reader.join(1000L);
         String text = new String(out.toByteArray(), StandardCharsets.UTF_8);
         if (process.exitValue() != 0) {
             throw new BrowserStateException(
