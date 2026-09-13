@@ -1,80 +1,94 @@
-# Chromium browser capability policy
+# Browser capability policy
 
-AIHub is an AI-oriented shell around Chromium WebEngine, not a replacement browser engine. The default rule is:
+AIHub is compiled into the full Chromium Android browser. Browser capabilities are therefore **inherited from Chromium**, not reimplemented by AIHub.
 
-> If the selected WebEngine revision already owns a browser capability, AIHub should expose/retain it rather than reimplementing it per AI provider.
+The overlay is allowed to change presentation and AI workflow only. If an AIHub change breaks a normal Chrome capability, treat that as an integration regression.
 
-Provider-specific code is reserved for AI-page interaction rules (composer/send/new-chat/stop), not general browser behavior.
+## Capability ownership
 
-## Capability matrix
+| Capability | Owner | AIHub responsibility |
+|---|---|---|
+| rendering / JS / network | Chromium | do not replace |
+| cookies / localStorage / IndexedDB | Chromium | never copy/export |
+| website login / OAuth | Chromium + website | keep normal navigation/tab flow usable |
+| downloads | Chromium | do not add a second download manager |
+| file chooser | Chromium | click the real website file input |
+| camera / microphone / geolocation | Chromium permission/site-settings stack | do not auto-grant/bypass |
+| password manager / autofill | Chromium | do not store website passwords |
+| popup / new-window / OAuth tabs | Chromium | always resolve actions against current real tab |
+| media playback | Chromium | do not replace media pipeline |
+| normal tab restore/lifecycle | Chromium | store only provider→tab-id association |
+| Safe Browsing/security behavior | Chromium | no bypass layer |
+| AI provider switching | AIHub | select retained real Chrome tab |
+| unified composer/actions | AIHub | generic DOM engine + JSON fallbacks |
+| custom AI metadata | AIHub | name/url/rule metadata only |
 
-| Capability | AIHub repository state | Owner | Real-device verification |
-| --- | --- | --- | --- |
-| HTML/JS/rendering | delegated | Chromium/WebEngine | required with selected revision |
-| cookies / localStorage / IndexedDB | retained per provider profile | Chromium/WebEngine | required |
-| provider session restoration | deterministic profile + persistence ID | Chromium/WebEngine + host seam | required |
-| back / forward / reload | wired to current active Chromium tab | Chromium/WebEngine | required |
-| OAuth / sign-in redirects | active-tab-safe host architecture | Chromium/WebEngine | required for each login provider |
-| popup/new active tab | AIHub resolves `TabManager.getActiveTab()` per operation | Chromium/WebEngine | required |
-| AIHub text send/new-chat/stop | generic DOM engine + provider rules | AIHub | provider tests required |
-| Android document attachment | common bridge implemented | AIHub + Chromium page | provider tests required |
-| camera | host capability declared; no silent grant | Chromium/WebEngine permission flow | required |
-| microphone / WebRTC | host capability declared; no silent grant | Chromium/WebEngine permission flow | required |
-| geolocation | host capability declared; no silent grant | Chromium/WebEngine permission flow | required |
-| notifications | host capability declared | Chromium/WebEngine / Android | required |
-| autofill / password-manager behavior | do not duplicate | selected WebEngine revision | required |
-| safe-browsing behavior | do not duplicate | selected WebEngine revision | required |
-| downloads | do not add provider-specific downloader | selected WebEngine revision / host seam | required before claiming support |
-| renderer crash recovery | retained persistence architecture; no speculative replacement | WebEngine + host seam | required |
-| loading/progress indication | intentionally waits for verified observer API in selected revision | host seam | pending integration verification |
+## Chrome controls
 
-## Active-tab invariant
+AIHub hides Chromium's normal control container by default to present an AI-first shell. It does **not** destroy the controls.
 
-AIHub must never assume that the first `Tab` opened for a provider remains the browser's active page forever.
+The top `Chrome` button toggles the normal controls back on. This provides an escape hatch for browser UI that should remain Chromium-owned, including page/site tools that AIHub does not duplicate.
 
-The host stores the provider's `TabManager`. Every normal browser operation resolves the current active tab at operation time. This is important for OAuth, authentication popups and websites that activate a new tab/window.
+## Provider tabs
 
-A single attachment transaction is the exception: it snapshots the active tab once at upload start and keeps the whole upload on that same page.
+Each provider is associated with a normal non-incognito Chrome tab ID. This is intentionally not a separate browser profile per AI.
 
-## Permission policy
+Advantages:
 
-The manifest declares browser-relevant capabilities such as camera, microphone, coarse/fine location and Android notifications. Declaration is not permission.
+- website authentication follows normal Chrome behavior
+- popup/new-window flows stay in the same tab model
+- browser history/navigation remains Chromium-native
+- no duplicated cookie/storage implementation
+- lower maintenance cost across Chromium upgrades
 
-AIHub must not silently grant a site access. The selected Chromium/WebEngine revision remains responsible for its browser/site permission path, with Android runtime behavior verified on a real device. If a revision requires an embedder callback for a permission, that callback belongs only in `AiWebEngineHost.java` (or a host helper owned exclusively by it), never in provider-specific code.
+If a retained tab is gone, AIHub creates a new normal Chrome tab for the provider homepage and stores its new ID.
 
-## Login policy
+## Attachments
 
-AIHub does not intercept passwords, OAuth tokens or cookies. Users sign in on the real AI website. Sign-in redirects and popup/new-tab behavior must stay inside Chromium/WebEngine.
+### User taps AIHub Attach
 
-The AIHub command layer sees only provider IDs and high-level actions. Third-party AIHub integrations never receive website credentials or browser storage.
+```text
+AIHub
+→ generic script clicks website input[type=file]
+→ Chromium native file chooser
+→ website receives selected file normally
+```
 
-## Download policy
+This is the preferred path.
 
-Do not create one downloader for ChatGPT, another for Claude, etc. First verify the selected WebEngine revision's download behavior. If embedder code is required, implement it once in the Chromium host seam and expose only generic status/UI to AIHub.
+### Android share already contains URIs
 
-## Upgrade policy
+When another Android app has already supplied content URIs, `BrowserSessionRuntime` reads those URIs and uses a generic DataTransfer/file-input bridge. This path is limited to 64 MiB aggregate data and exists only for preselected external content.
 
-When a Chromium revision changes browser behavior:
+## DOM execution
 
-1. verify the upstream WebEngine sample;
-2. run `scripts/check_chromium_checkout.py`;
-3. adapt `AiWebEngineHost.java` if Java APIs changed;
-4. adapt `chromium-overlay/BUILD.gn` if upstream target names/dependencies moved;
-5. update the compatibility checker;
-6. keep `aihub-core`, provider switching and the AI-first UI revision-independent.
+AIHub executes generic page actions through the current tab's live main `RenderFrameHost` isolated world.
 
-## Completion boundary
+Reasons:
 
-Repository-side architecture, provider-only sessions, active-tab handling, browser capability declarations, security boundaries, rule tooling and CI can be completed without a local Chromium tree.
+- avoid depending on provider Java classes
+- avoid putting AIHub helper variables into the page's normal JS world
+- keep one generic action engine
+- resolve the active tab at operation time so login/popup/tab transitions do not leave AIHub targeting a stale initial tab
 
-The following cannot be truthfully marked complete until a real compatible Chromium Android checkout and device are available:
+## Loading state
 
-- final GN/`autoninja` compilation for the chosen revision;
-- installation of the matching WebEngine support APK;
-- camera/microphone/location permission behavior;
-- downloads;
-- OAuth/popup behavior for each supported AI login route;
-- renderer crash/session restoration;
-- exact navigation/loading observer integration.
+AIHub does not need a second browser loading engine. The Chrome bridge reads `Tab.isLoading()` and `Tab.getProgress()` directly. Future visual progress indicators should consume those host values rather than add another navigation observer stack unless the UI genuinely needs callbacks.
 
-Those are integration tests, not reasons to duplicate Chromium subsystems inside AIHub.
+## What real-device validation must prove
+
+A successful integration should demonstrate that the AI overlay does not regress normal Chromium behavior for:
+
+- account/password login forms
+- Google/OAuth login flows used by AI providers
+- downloads
+- file chooser
+- camera/microphone permissions
+- geolocation if requested by a site
+- popup/new-tab flows
+- back/forward/reload
+- background/foreground and process restore
+- media playback
+- Chrome controls toggle
+
+Failures should first be classified as Chromium upstream/device, overlay/hook, bridge, or provider-rule issues before adding new code.
