@@ -33,11 +33,17 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Core smoke test
-        run: bash scripts/run_core_smoke_test.sh
+      - name: Validate repository
+        run: |
+          python3 scripts/validate_provider_rules.py
+          python3 scripts/validate_repo.py
+          bash scripts/run_core_smoke_test.sh
 
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Android lint
+        run: gradle :app:lintDebug --stacktrace --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
