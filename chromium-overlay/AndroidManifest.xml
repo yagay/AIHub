@@ -9,10 +9,15 @@
 
         <activity
             android:name="com.yagay.aihub.chromium.AiHubShellActivity"
-            android:exported="true"
+            android:exported="false"
             android:launchMode="singleTask"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name="com.yagay.aihub.chromium.AiHubEntryActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
