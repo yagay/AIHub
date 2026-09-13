@@ -31,22 +31,22 @@
   const visible = element => !!element && !element.disabled &&
       !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
 
-  const firstExisting = list => {
+  const existing = (list, pick = 'first') => {
     for (const selector of array(list)) {
       try {
-        const element = document.querySelector(selector);
-        if (element && !element.disabled) return element;
+        const nodes = [...document.querySelectorAll(selector)].filter(element => !element.disabled);
+        if (!nodes.length) continue;
+        return pick === 'last' ? nodes[nodes.length - 1] : nodes[0];
       } catch (_) {}
     }
     return null;
   };
 
-  const semanticControl = words => {
+  const semanticControl = (words, pick = 'first') => {
     const lowered = array(words).map(word => String(word).trim().toLowerCase()).filter(Boolean);
     if (!lowered.length) return null;
 
-    let best = null;
-    let bestScore = -1;
+    const candidates = [];
     for (const element of document.querySelectorAll('button,[role="button"],a,[tabindex]')) {
       if (element.disabled) continue;
       const aria = (element.getAttribute('aria-label') || '').trim().toLowerCase();
@@ -60,12 +60,12 @@
         else if (title.includes(word) || testId.includes(word)) score += 7;
         else if (text.includes(word)) score += 4;
       }
-      if (score > bestScore) {
-        best = element;
-        bestScore = score;
-      }
+      if (score > 0) candidates.push({ element, score });
     }
-    return bestScore > 0 ? best : null;
+    if (!candidates.length) return null;
+    const bestScore = Math.max(...candidates.map(item => item.score));
+    const best = candidates.filter(item => item.score === bestScore);
+    return (pick === 'last' ? best[best.length - 1] : best[0]).element;
   };
 
   const temporarilyClickable = element => {
@@ -157,12 +157,12 @@
     dispatchInput(input, value);
   };
 
-  const clickAction = (configured, words) => {
-    const element = firstExisting(configured) || semanticControl(words);
+  const clickAction = (configured, words, pick = 'first') => {
+    const element = existing(configured, pick) || semanticControl(words, pick);
     return temporarilyClickable(element);
   };
 
-  const findComposer = command => firstExisting(selectors(command, 'input')) ||
+  const findComposer = command => existing(selectors(command, 'input')) ||
     [...document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]')]
       .find(element => !element.disabled) || null;
 
@@ -237,7 +237,8 @@
     }
 
     if (action === 'uiAction') {
-      const clicked = clickAction(command.actionSelectors, command.actionKeywords);
+      const pick = command.actionPick === 'last' ? 'last' : 'first';
+      const clicked = clickAction(command.actionSelectors, command.actionKeywords, pick);
       respond({ ok: clicked, control: command.uiActionId || '', url: location.href });
       return;
     }
