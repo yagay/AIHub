@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "com.yagay.aihub.android"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 31
