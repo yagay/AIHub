@@ -29,7 +29,9 @@ MainActivity
 MainController
     ├── MainScreen                 native Android UI only
     ├── ProviderRegistry
-    │      └── AiProviderAdapter
+    │      └── providers.json      URLs/selectors only
+    │             ↓
+    │      AiProviderAdapter
     │             └── GenericWebProviderAdapter
     │                    └── ProviderSpec
     ├── AccountRepository
@@ -46,7 +48,10 @@ MainController
 : Native app controls. No website-specific code.
 
 `provider/`
-: Uniform AI-provider interface. Most providers reuse `GenericWebProviderAdapter`.
+: Uniform AI-provider interface. Normal providers reuse `GenericWebProviderAdapter`.
+
+`assets/providers.json`
+: Single configuration source for provider URLs and selector fallbacks.
 
 `model/`
 : Small immutable data models such as `ProviderSpec` and `AccountProfile`.
@@ -65,12 +70,14 @@ MainController
 The normal maintenance path is intentionally small:
 
 ```text
-ProviderRegistry.java
+app/src/main/assets/providers.json
         ↓
 change URL/selectors for one provider
         ↓
 no UI/session/account changes required
 ```
+
+Adding a normal AI website is also just another entry in `providers.json`.
 
 If a provider eventually needs behavior that cannot be represented by generic selectors, create a provider-specific implementation of `AiProviderAdapter`. The rest of the application stays unchanged.
 
@@ -105,12 +112,15 @@ The rebuilt project intentionally has only one Gradle Android module:
 ```text
 AIHub/
 ├── app/
+│   └── src/main/
+│       ├── assets/providers.json
+│       └── java/com/yagay/aihub/
 ├── build.gradle.kts
 ├── settings.gradle.kts
 └── .github/workflows/core.yml
 ```
 
-No old `aihub-core` / `aihub-android` module is required by the new architecture.
+The previous `aihub-core` and `aihub-android` trees were removed from `main`; there is only one active implementation to maintain.
 
 ## Build
 
