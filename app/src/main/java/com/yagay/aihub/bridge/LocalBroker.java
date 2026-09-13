@@ -90,6 +90,36 @@ public final class LocalBroker implements Closeable {
         });
     }
 
+    /** Privacy-safe live state for one-click diagnostics. No prompts or responses are included. */
+    public String diagnosticSnapshot() {
+        JSONObject root = new JSONObject();
+        try {
+            root.put("running", running);
+            root.put("port", PORT);
+            root.put("serverBound", server != null && server.isBound() && !server.isClosed());
+            synchronized (lock) {
+                root.put("bridgeClients", clients.size());
+                root.put("queuedCommands", queue.size());
+                root.put("pendingCommands", pending.size());
+                root.put("knownCommands", commands.size());
+
+                JSONArray clientArray = new JSONArray();
+                int index = 0;
+                for (WsClient client : clients) {
+                    JSONObject item = new JSONObject();
+                    item.put("index", index++);
+                    item.put("open", client.open);
+                    item.put("providers", new JSONArray(client.providers));
+                    item.put("assignedCount", client.assigned.size());
+                    clientArray.put(item);
+                }
+                root.put("clients", clientArray);
+            }
+        } catch (Exception ignored) {
+        }
+        return root.toString(2);
+    }
+
     private void handle(Socket socket) {
         try {
             BufferedInputStream in = new BufferedInputStream(socket.getInputStream());
@@ -618,24 +648,19 @@ public final class LocalBroker implements Closeable {
                 : status == 403 ? "Forbidden"
                 : status == 404 ? "Not Found"
                 : status == 502 ? "Bad Gateway"
-                : "Error";
-
-        StringBuilder headers = new StringBuilder()
-                .append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
+                : "Status";
+        StringBuilder headers = new StringBuilder();
+        headers.append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
                 .append("Content-Type: ").append(type).append("\r\n")
                 .append("Content-Length: ").append(bytes.length).append("\r\n")
-                .append("Cache-Control: no-store\r\n")
                 .append("Connection: close\r\n");
-
-        if (UI_ORIGIN.equals(origin)) {
+        if (origin != null && isUiOriginAllowed(origin)) {
             headers.append("Access-Control-Allow-Origin: ").append(UI_ORIGIN).append("\r\n")
-                    .append("Vary: Origin\r\n")
                     .append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n")
                     .append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n")
-                    .append("Access-Control-Allow-Private-Network: true\r\n");
+                    .append("Vary: Origin\r\n");
         }
         headers.append("\r\n");
-
         out.write(headers.toString().getBytes(StandardCharsets.US_ASCII));
         out.write(bytes);
         out.flush();
@@ -644,20 +669,19 @@ public final class LocalBroker implements Closeable {
     @Override
     public void close() {
         running = false;
-        try {
-            if (server != null) {
-                server.close();
-            }
-        } catch (Exception ignored) {
-        }
-
-        Set<WsClient> snapshot;
+        try { if (server != null) server.close(); } catch (Exception ignored) {}
         synchronized (lock) {
-            snapshot = new HashSet<>(clients);
+            for (WsClient client : new HashSet<>(clients)) {
+                client.closeQuietly();
+            }
             clients.clear();
-        }
-        for (WsClient client : snapshot) {
-            client.closeQuietly();
+            for (CompletableFuture<Result> future : pending.values()) {
+                future.complete(new Result("", "AIHub broker stopped"));
+            }
+            pending.clear();
+            commands.clear();
+            queue.clear();
+            queuedIds.clear();
         }
         workers.shutdownNow();
     }
@@ -669,11 +693,8 @@ public final class LocalBroker implements Closeable {
         final Map<String, String> headers;
         final String origin;
 
-        Request(String method,
-                String path,
-                String body,
-                Map<String, String> headers,
-                String origin) {
+        Request(String method, String path, String body,
+                Map<String, String> headers, String origin) {
             this.method = method;
             this.path = path;
             this.body = body;
@@ -684,18 +705,7 @@ public final class LocalBroker implements Closeable {
         boolean isWebSocketUpgrade() {
             return "websocket".equalsIgnoreCase(headers.get("upgrade"))
                     && headers.getOrDefault("connection", "")
-                    .toLowerCase(Locale.ROOT)
-                    .contains("upgrade");
-        }
-    }
-
-    private static final class Result {
-        final String response;
-        final String error;
-
-        Result(String response, String error) {
-            this.response = response;
-            this.error = error;
+                    .toLowerCase(Locale.ROOT).contains("upgrade");
         }
     }
 
@@ -710,12 +720,22 @@ public final class LocalBroker implements Closeable {
             this.prompt = prompt;
         }
 
-        JSONObject toJson() throws Exception {
+        JSONObject toJson() throws org.json.JSONException {
             return new JSONObject()
-                    .put("type", "command")
+                    .put("type", "ask")
                     .put("id", id)
                     .put("provider", provider)
                     .put("prompt", prompt);
+        }
+    }
+
+    private static final class Result {
+        final String response;
+        final String error;
+
+        Result(String response, String error) {
+            this.response = response == null ? "" : response;
+            this.error = error == null ? "" : error;
         }
     }
 
@@ -735,9 +755,9 @@ public final class LocalBroker implements Closeable {
         final Socket socket;
         final InputStream in;
         final OutputStream out;
-        final Object writeLock = new Object();
         final Set<String> providers = new HashSet<>();
         final Set<String> assigned = new HashSet<>();
+        final Object sendLock = new Object();
         volatile boolean open = true;
 
         WsClient(Socket socket, InputStream in, OutputStream out) {
@@ -751,13 +771,10 @@ public final class LocalBroker implements Closeable {
         }
 
         void sendFrame(int opcode, byte[] payload) throws Exception {
-            synchronized (writeLock) {
-                if (!open) {
-                    throw new EOFException("WebSocket closed");
-                }
-
-                out.write(0x80 | (opcode & 0x0F));
+            synchronized (sendLock) {
+                if (!open) throw new EOFException("WebSocket client closed");
                 int length = payload.length;
+                out.write(0x80 | (opcode & 0x0F));
                 if (length < 126) {
                     out.write(length);
                 } else if (length <= 0xFFFF) {
@@ -778,10 +795,7 @@ public final class LocalBroker implements Closeable {
 
         void closeQuietly() {
             open = false;
-            try {
-                socket.close();
-            } catch (Exception ignored) {
-            }
+            try { socket.close(); } catch (Exception ignored) {}
         }
     }
 }
