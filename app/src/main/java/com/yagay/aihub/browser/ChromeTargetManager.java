@@ -7,8 +7,6 @@ import android.net.Uri;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -57,7 +55,7 @@ public final class ChromeTargetManager {
     }
 
     private Target createTarget(String url) {
-        String encoded = URLEncoder.encode(url, StandardCharsets.UTF_8);
+        String encoded = Uri.encode(url);
         Request request = new Request.Builder()
                 .url(BASE + "/json/new?" + encoded)
                 .put(RequestBody.create(new byte[0], OCTET))
