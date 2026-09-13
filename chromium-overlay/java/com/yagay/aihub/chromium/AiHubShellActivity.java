@@ -27,6 +27,8 @@ import com.yagay.aihub.core.ProviderConfig;
 import com.yagay.aihub.core.command.AiCommand;
 import com.yagay.aihub.core.command.CommandResult;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -39,6 +41,8 @@ import java.util.UUID;
 public final class AiHubShellActivity extends AppCompatActivity {
     private static final int REQUEST_ATTACHMENTS = 4107;
     private static final int REQUEST_EXPORT_DIAGNOSTICS = 4108;
+    private static final int REQUEST_IMPORT_SIGNED_RULES = 4109;
+    private static final int MAX_RULE_BUNDLE_BYTES = 2 * 1024 * 1024;
 
     private AiHubStateStore stateStore;
     private AiHubBootstrap.Graph graph;
@@ -81,6 +85,11 @@ public final class AiHubShellActivity extends AppCompatActivity {
         if (requestCode == REQUEST_EXPORT_DIAGNOSTICS) {
             if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
             writeDiagnostics(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_IMPORT_SIGNED_RULES) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+            importSignedRules(data.getData());
         }
     }
 
@@ -230,11 +239,13 @@ public final class AiHubShellActivity extends AppCompatActivity {
     private void showAccountPicker() {
         String providerId = graph.sessions.currentKey().providerId();
         List<AiAccount> accounts = graph.accounts.forProvider(providerId);
-        String[] labels = new String[accounts.size() + 1];
+        String[] labels = new String[accounts.size() + 2];
         for (int i = 0; i < accounts.size(); i++) labels[i] = accounts.get(i).label();
-        labels[labels.length - 1] = getString(R.string.add_account);
+        labels[accounts.size()] = getString(R.string.add_account);
+        labels[accounts.size() + 1] = getString(R.string.manage_accounts);
         new AlertDialog.Builder(this).setTitle(R.string.choose_account).setItems(labels, (dialog, which) -> {
             if (which == accounts.size()) showAddAccountDialog(providerId);
+            else if (which == accounts.size() + 1) showManageAccounts(providerId);
             else selectAccount(accounts.get(which));
         }).show();
     }
@@ -265,18 +276,68 @@ public final class AiHubShellActivity extends AppCompatActivity {
                 }).show();
     }
 
+    private void showManageAccounts(String providerId) {
+        List<AiAccount> accounts = graph.accounts.forProvider(providerId);
+        String[] labels = accounts.stream().map(AiAccount::label).toArray(String[]::new);
+        new AlertDialog.Builder(this).setTitle(R.string.manage_accounts).setItems(labels,
+                (dialog, which) -> showAccountActions(accounts.get(which))).show();
+    }
+
+    private void showAccountActions(AiAccount account) {
+        String[] actions = { getString(R.string.rename_account), getString(R.string.remove_account) };
+        new AlertDialog.Builder(this).setTitle(account.label()).setItems(actions, (dialog, which) -> {
+            if (which == 0) showRenameAccountDialog(account);
+            else confirmRemoveAccount(account);
+        }).show();
+    }
+
+    private void showRenameAccountDialog(AiAccount account) {
+        EditText label = new EditText(this);
+        label.setText(account.label());
+        label.selectAll();
+        new AlertDialog.Builder(this).setTitle(R.string.rename_account).setView(label)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    try {
+                        graph.sessions.renameAccount(account.id(), label.getText().toString());
+                        stateStore.saveAccounts(graph.accounts.all());
+                        onSessionChanged();
+                    } catch (RuntimeException error) {
+                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void confirmRemoveAccount(AiAccount account) {
+        new AlertDialog.Builder(this).setTitle(R.string.remove_account)
+                .setMessage(R.string.remove_account_warning)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    try {
+                        graph.sessions.removeAccount(account.id());
+                        stateStore.saveAccounts(graph.accounts.all());
+                        stateStore.saveWorkspaces(graph.workspaces.all());
+                        onSessionChanged();
+                    } catch (RuntimeException error) {
+                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
     private void showWorkspacePicker() {
         List<AiWorkspace> workspaces = graph.workspaces.all();
-        String[] labels = new String[workspaces.size() + 2];
+        String[] labels = new String[workspaces.size() + 3];
         labels[0] = getString(R.string.no_workspace);
         for (int i = 0; i < workspaces.size(); i++) labels[i + 1] = workspaces.get(i).label();
-        labels[labels.length - 1] = getString(R.string.create_workspace);
+        labels[workspaces.size() + 1] = getString(R.string.create_workspace);
+        labels[workspaces.size() + 2] = getString(R.string.manage_workspaces);
         new AlertDialog.Builder(this).setTitle(R.string.choose_workspace).setItems(labels, (dialog, which) -> {
             if (which == 0) {
                 graph.sessions.clearWorkspace();
                 stateStore.saveWorkspaceId(null);
                 onSessionChanged();
-            } else if (which == labels.length - 1) showCreateWorkspaceDialog();
+            } else if (which == workspaces.size() + 1) showCreateWorkspaceDialog();
+            else if (which == workspaces.size() + 2) showManageWorkspaces();
             else {
                 graph.sessions.switchWorkspace(workspaces.get(which - 1).id());
                 onSessionChanged();
@@ -304,10 +365,59 @@ public final class AiHubShellActivity extends AppCompatActivity {
                 }).show();
     }
 
+    private void showManageWorkspaces() {
+        List<AiWorkspace> workspaces = graph.workspaces.all();
+        if (workspaces.isEmpty()) {
+            Toast.makeText(this, R.string.no_workspace_short, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = workspaces.stream().map(AiWorkspace::label).toArray(String[]::new);
+        new AlertDialog.Builder(this).setTitle(R.string.manage_workspaces).setItems(labels,
+                (dialog, which) -> showWorkspaceActions(workspaces.get(which))).show();
+    }
+
+    private void showWorkspaceActions(AiWorkspace workspace) {
+        String[] actions = { getString(R.string.rename_workspace), getString(R.string.delete_workspace) };
+        new AlertDialog.Builder(this).setTitle(workspace.label()).setItems(actions, (dialog, which) -> {
+            if (which == 0) showRenameWorkspaceDialog(workspace);
+            else confirmDeleteWorkspace(workspace);
+        }).show();
+    }
+
+    private void showRenameWorkspaceDialog(AiWorkspace workspace) {
+        EditText label = new EditText(this);
+        label.setText(workspace.label());
+        label.selectAll();
+        new AlertDialog.Builder(this).setTitle(R.string.rename_workspace).setView(label)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    try {
+                        graph.sessions.renameWorkspace(workspace.id(), label.getText().toString());
+                        stateStore.saveWorkspaces(graph.workspaces.all());
+                        onSessionChanged();
+                    } catch (RuntimeException error) {
+                        Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }).show();
+    }
+
+    private void confirmDeleteWorkspace(AiWorkspace workspace) {
+        new AlertDialog.Builder(this).setTitle(R.string.delete_workspace).setMessage(workspace.label())
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    graph.sessions.removeWorkspace(workspace.id());
+                    stateStore.saveWorkspaces(graph.workspaces.all());
+                    stateStore.saveWorkspaceId(graph.sessions.activeWorkspaceId());
+                    onSessionChanged();
+                }).show();
+    }
+
     private void showToolsMenu() {
         String[] items = {
                 getString(R.string.provider_diagnostics),
                 getString(R.string.export_diagnostics),
+                getString(R.string.import_signed_rules),
+                getString(R.string.rollback_rules),
                 getString(R.string.integration_token),
                 getString(R.string.rotate_token),
                 getString(R.string.rule_warnings),
@@ -317,10 +427,12 @@ public final class AiHubShellActivity extends AppCompatActivity {
             switch (which) {
                 case 0 -> showProviderDiagnostics();
                 case 1 -> exportDiagnostics();
-                case 2 -> showIntegrationToken(false);
-                case 3 -> confirmRotateToken();
-                case 4 -> showRuleWarnings();
-                case 5 -> showCurrentUrl();
+                case 2 -> openSignedRulesPicker();
+                case 3 -> rollbackSignedRules();
+                case 4 -> showIntegrationToken(false);
+                case 5 -> confirmRotateToken();
+                case 6 -> showRuleWarnings();
+                case 7 -> showCurrentUrl();
                 default -> { }
             }
         }).show();
@@ -366,6 +478,88 @@ public final class AiHubShellActivity extends AppCompatActivity {
             Toast.makeText(this, R.string.diagnostics_saved, Toast.LENGTH_SHORT).show();
         } catch (Exception error) {
             Toast.makeText(this, R.string.diagnostics_export_failed, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openSignedRulesPicker() {
+        SignedProviderRuleBundle signed = new SignedProviderRuleBundle(this, stateStore);
+        if (!signed.isConfigured()) {
+            Toast.makeText(this,
+                    getString(R.string.rules_update_failed, "no Ed25519 public key configured"),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/json")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(picker, REQUEST_IMPORT_SIGNED_RULES);
+    }
+
+    private void importSignedRules(Uri uri) {
+        try {
+            String envelope = readSmallTextFile(uri, MAX_RULE_BUNDLE_BYTES);
+            SignedProviderRuleBundle.Verified verified =
+                    new SignedProviderRuleBundle(this, stateStore).install(envelope);
+            reloadGraphAfterRuleChange();
+            Toast.makeText(this, getString(R.string.rules_installed, verified.version()), Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            Toast.makeText(this,
+                    getString(R.string.rules_update_failed,
+                            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void rollbackSignedRules() {
+        try {
+            SignedProviderRuleBundle signed = new SignedProviderRuleBundle(this, stateStore);
+            if (!signed.rollback()) {
+                Toast.makeText(this, R.string.no_rules_rollback, Toast.LENGTH_LONG).show();
+                return;
+            }
+            reloadGraphAfterRuleChange();
+            Toast.makeText(this, R.string.rules_rolled_back, Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            Toast.makeText(this,
+                    getString(R.string.rules_update_failed,
+                            error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void reloadGraphAfterRuleChange() {
+        AiSessionKey oldKey = graph.sessions.currentKey();
+        String oldWorkspace = graph.sessions.activeWorkspaceId();
+        graph = AiHubBootstrap.create(this, stateStore, runtime);
+        try {
+            if (oldWorkspace != null && graph.workspaces.contains(oldWorkspace)
+                    && graph.providers.contains(oldKey.providerId())) {
+                graph.sessions.activate(oldKey.providerId(), null, oldWorkspace);
+            } else if (graph.providers.contains(oldKey.providerId()) && graph.accounts.contains(oldKey.accountId())) {
+                graph.sessions.activate(oldKey.providerId(), oldKey.accountId(), null);
+            } else {
+                activateFirstSession();
+            }
+        } catch (RuntimeException error) {
+            activateFirstSession();
+        }
+        onSessionChanged();
+    }
+
+    private String readSmallTextFile(Uri uri, int maxBytes) throws Exception {
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalArgumentException("Cannot open selected file");
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[16 * 1024];
+            int total = 0;
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBytes) throw new IllegalArgumentException("Rule bundle exceeds 2 MiB limit");
+                output.write(buffer, 0, read);
+            }
+            return output.toString(StandardCharsets.UTF_8);
         }
     }
 
