@@ -32,6 +32,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // aapt's default ignore list contains <dir>_*, which silently drops
+    // Next.js' required assets/ui/_next directory and produces a blank WebView.
+    // Keep the normal junk-file filters, but deliberately allow underscore dirs.
+    androidResources {
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
 }
 
 dependencies {
