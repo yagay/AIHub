@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Inject AIHub's minimal source/hook seam into a Chromium Android checkout.
+
+The repository must already be copied to <chromium>/aihub. The patch is intentionally tiny:
+1. add AIHub Java sources to chrome_java_sources.gni;
+2. add one fully-qualified attach call inside ChromeTabbedActivity.performPostInflationStartup().
+
+All browser behavior continues to be owned by normal Chromium Chrome code.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import sys
+
+SOURCES_BEGIN = "  # AIHUB-SOURCES-BEGIN\n"
+SOURCES_END = "  # AIHUB-SOURCES-END\n"
+HOOK_LINE = "        com.yagay.aihub.chromium.AiHubChromeHook.attach(this);\n"
+HOOK_COMMENT = "        // AIHUB-HOOK: attach AI-first UI to the normal Chrome tabbed activity.\n"
+
+
+def die(message: str) -> None:
+    print(f"AIHub Chrome overlay: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def java_sources(aihub_root: pathlib.Path, chromium_root: pathlib.Path) -> list[str]:
+    groups = [
+        aihub_root / "aihub-core" / "src" / "main" / "java",
+        aihub_root / "aihub-android" / "java",
+    ]
+    files: list[pathlib.Path] = []
+    for group in groups:
+        if not group.is_dir():
+            die(f"missing source directory: {group}")
+        files.extend(sorted(group.rglob("*.java")))
+
+    for name in ("AiHubChromeBridge.java", "AiHubChromeHook.java"):
+        path = (
+            aihub_root
+            / "chromium-overlay"
+            / "java"
+            / "com"
+            / "yagay"
+            / "aihub"
+            / "chromium"
+            / name
+        )
+        if not path.is_file():
+            die(f"missing Chrome seam source: {path}")
+        files.append(path)
+
+    result = []
+    for path in files:
+        try:
+            rel = path.relative_to(chromium_root).as_posix()
+        except ValueError:
+            die(f"AIHub must live inside Chromium checkout: {path}")
+        result.append("//" + rel)
+    return sorted(dict.fromkeys(result))
+
+
+def patch_sources(chromium_root: pathlib.Path, sources: list[str]) -> None:
+    path = chromium_root / "chrome" / "android" / "chrome_java_sources.gni"
+    if not path.is_file():
+        die(f"missing {path}")
+    text = path.read_text(encoding="utf-8")
+    block = SOURCES_BEGIN + "".join(f'  "{source}",\n' for source in sources) + SOURCES_END
+
+    if SOURCES_BEGIN in text or SOURCES_END in text:
+        if SOURCES_BEGIN not in text or SOURCES_END not in text:
+            die("chrome_java_sources.gni contains only one AIHub marker; repair it first")
+        start = text.index(SOURCES_BEGIN)
+        end = text.index(SOURCES_END, start) + len(SOURCES_END)
+        text = text[:start] + block + text[end:]
+    else:
+        anchor = "chrome_java_sources = [\n"
+        index = text.find(anchor)
+        if index < 0:
+            die("cannot find chrome_java_sources = [ anchor")
+        insert = index + len(anchor)
+        text = text[:insert] + block + text[insert:]
+
+    path.write_text(text, encoding="utf-8")
+    print(f"patched source list: {path}")
+
+
+def patch_activity(chromium_root: pathlib.Path) -> None:
+    path = (
+        chromium_root
+        / "chrome"
+        / "android"
+        / "java"
+        / "src"
+        / "org"
+        / "chromium"
+        / "chrome"
+        / "browser"
+        / "ChromeTabbedActivity.java"
+    )
+    if not path.is_file():
+        die(f"missing {path}")
+    text = path.read_text(encoding="utf-8")
+    if HOOK_LINE.strip() in text:
+        print(f"hook already present: {path}")
+        return
+
+    method = "public void performPostInflationStartup()"
+    method_start = text.find(method)
+    if method_start < 0:
+        die("ChromeTabbedActivity no longer has performPostInflationStartup()")
+
+    # Limit the search to this method so a similarly named control-container assignment elsewhere
+    # cannot accidentally become our hook point.
+    method_end = text.find("\n    @Override", method_start + len(method))
+    if method_end < 0:
+        method_end = min(len(text), method_start + 20_000)
+    section = text[method_start:method_end]
+    anchor = "        mControlContainer = findViewById(R.id.control_container);\n"
+    local = section.find(anchor)
+    if local < 0:
+        die(
+            "performPostInflationStartup() no longer contains the control-container anchor; "
+            "adapt only scripts/apply_chrome_overlay.py to the new Chromium revision"
+        )
+
+    insert = method_start + local + len(anchor)
+    text = text[:insert] + HOOK_COMMENT + HOOK_LINE + text[insert:]
+    path.write_text(text, encoding="utf-8")
+    print(f"patched activity hook: {path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Apply AIHub to Chromium Chrome Android")
+    parser.add_argument("chromium_src", help="Path to Chromium src directory")
+    args = parser.parse_args()
+
+    chromium_root = pathlib.Path(args.chromium_src).resolve()
+    aihub_root = chromium_root / "aihub"
+    if not (chromium_root / "chrome" / "android").is_dir():
+        die(f"{chromium_root} does not look like a Chromium Android checkout")
+    if not aihub_root.is_dir():
+        die(f"AIHub is not synced to {aihub_root}")
+
+    sources = java_sources(aihub_root, chromium_root)
+    patch_sources(chromium_root, sources)
+    patch_activity(chromium_root)
+    print(f"AIHub Chrome overlay applied ({len(sources)} Java sources)")
+
+
+if __name__ == "__main__":
+    main()
