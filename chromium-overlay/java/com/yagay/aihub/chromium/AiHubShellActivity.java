@@ -602,6 +602,9 @@ public final class AiHubShellActivity extends AppCompatActivity {
     }
 
     private void handleExternalIntent(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(AiHubEntryActivity.EXTRA_INTERNAL_DISPATCH, false)) return;
+        // Consume before execution so configuration-change recreation cannot repeat the command.
+        intent.removeExtra(AiHubEntryActivity.EXTRA_INTERNAL_DISPATCH);
         AiCommand command = AiHubExternalCommandParser.parse(intent, stateStore.clientToken());
         if (command == null) return;
         CommandResult result = graph.commands.execute(command);
