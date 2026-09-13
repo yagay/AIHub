@@ -17,7 +17,10 @@ public final class WebEngineSessionRuntime implements SessionRuntime {
         ListenableFuture<Tab> openOrRestoreTab(String profileName, String persistenceId, String url);
         void showProfile(String profileName);
         void closeProfile(String profileName);
-        void attachFiles(String profileName, ListenableFuture<Tab> tab, List<String> uriStrings);
+        ListenableFuture<String> attachFiles(
+                String profileName,
+                ListenableFuture<Tab> tab,
+                List<String> uriStrings);
     }
 
     private record Holder(String profileName, ProviderConfig provider, ListenableFuture<Tab> tabFuture) {}
@@ -75,6 +78,27 @@ public final class WebEngineSessionRuntime implements SessionRuntime {
             return;
         }
         host.attachFiles(h.profileName(), h.tabFuture(), List.copyOf(uriStrings));
+    }
+
+    @Override
+    public void attachAndSend(AiSessionKey key, List<String> uriStrings, String text) {
+        Holder h = require(key);
+        List<String> files = List.copyOf(uriStrings == null ? List.of() : uriStrings);
+        if (files.isEmpty()) {
+            sendText(key, text);
+            return;
+        }
+        if (text == null || text.isBlank()) {
+            attach(key, files);
+            return;
+        }
+        Futures.transformAsync(
+                host.attachFiles(h.profileName(), h.tabFuture(), files),
+                ignored -> Futures.transformAsync(
+                        h.tabFuture(),
+                        tab -> tab.executeScript(GenericDomScriptFactory.fillAndSend(text, h.provider()), false),
+                        Runnable::run),
+                Runnable::run);
     }
 
     @Override public void back(AiSessionKey key) {
