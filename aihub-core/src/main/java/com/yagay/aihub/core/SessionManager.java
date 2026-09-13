@@ -103,6 +103,18 @@ public final class SessionManager {
     public synchronized void attach(List<String> uris) {
         runtime.attach(currentKey(), List.copyOf(uris == null ? List.of() : uris));
     }
+    public synchronized void attachAndSend(List<String> uris, String text) {
+        List<String> safeUris = List.copyOf(uris == null ? List.of() : uris);
+        if (safeUris.isEmpty()) {
+            sendText(text);
+            return;
+        }
+        if (text == null || text.isBlank()) {
+            attach(safeUris);
+            return;
+        }
+        runtime.attachAndSend(currentKey(), safeUris, text);
+    }
     public synchronized void back() { runtime.back(currentKey()); }
     public synchronized void forward() { runtime.forward(currentKey()); }
     public synchronized void reload() { runtime.reload(currentKey()); }
