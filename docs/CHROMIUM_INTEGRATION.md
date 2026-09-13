@@ -68,7 +68,7 @@ python3 scripts/check_chromium_checkout.py /path/to/chromium/src
 The supported repository-side flow is:
 
 ```bash
-./scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
+bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
 ```
 
 The script:
@@ -86,13 +86,13 @@ The script:
 ## Build + install in one command
 
 ```bash
-./scripts/build_install_aihub.sh /path/to/chromium/src out/Default
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
 With multiple Android devices connected:
 
 ```bash
-./scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
 ```
 
 The install step discovers the generated APKs, installs them through `adb`, and launches the guarded exported `AiHubEntryActivity`. The real `AiHubShellActivity` intentionally remains unexported.
