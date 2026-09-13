@@ -18,7 +18,7 @@ public interface AiHubBrowserHost {
     ViewGroup overlayRoot();
 
     /** Optional native browser controls that AIHub can hide/show; null for the WebView app. */
-    @Nullable View browserControlContainer();
+    @Nullable View chromeControlContainer();
 
     /** Opens a retained provider page, or selects it if it already exists. */
     void openOrSelectProvider(String providerId, String homeUrl);
