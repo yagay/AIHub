@@ -43,35 +43,15 @@ fi
 
 echo "Using Android device: $SERIAL"
 
-AIHUB_APK=""
-if [[ -d "$OUT/apks" ]]; then
-  AIHUB_APK="$(find "$OUT/apks" -maxdepth 2 -type f -name 'AIHub.apk' -print -quit)"
-fi
-if [[ -z "$AIHUB_APK" ]]; then
-  echo "AIHub.apk not found under $OUT/apks; run scripts/build_aihub_chromium.sh first." >&2
+CHROME_APK="$OUT/apks/ChromePublic.apk"
+CHROME_RUNNER="$OUT/bin/chrome_public_apk"
+if [[ ! -f "$CHROME_APK" || ! -x "$CHROME_RUNNER" ]]; then
+  echo "ChromePublic.apk/runner not found; run scripts/build_aihub_chromium.sh first." >&2
   exit 7
 fi
 
-# A local WebEngine build commonly uses the support APK. Install it when the target produced one.
-SUPPORT_APK=""
-if [[ -d "$OUT/apks" ]]; then
-  SUPPORT_APK="$(find "$OUT/apks" -maxdepth 2 -type f \( -iname '*weblayer*support*.apk' -o -iname '*webengine*support*.apk' \) -print -quit)"
-fi
-if [[ -n "$SUPPORT_APK" ]]; then
-  echo "Installing WebEngine support APK: $SUPPORT_APK"
-  "${ADB_CMD[@]}" install -r -d "$SUPPORT_APK"
-else
-  echo "Warning: no local WebEngine support APK found under $OUT/apks." >&2
-  echo "The device must provide a compatible WebEngine/WebView implementation." >&2
-fi
+# Chromium's generated runner knows the package/activity details for this exact build.
+ANDROID_SERIAL="$SERIAL" "$CHROME_RUNNER" install
+ANDROID_SERIAL="$SERIAL" "$CHROME_RUNNER" launch
 
-echo "Installing AIHub APK: $AIHUB_APK"
-"${ADB_CMD[@]}" install -r -d "$AIHUB_APK"
-
-# Always enter through the exported guarded entry activity. The real shell intentionally remains unexported.
-"${ADB_CMD[@]}" shell am start -W \
-  -a android.intent.action.MAIN \
-  -c android.intent.category.LAUNCHER \
-  -n com.yagay.aihub/com.yagay.aihub.chromium.AiHubEntryActivity
-
-echo "AIHub installed and launched through AiHubEntryActivity."
+echo "Chromium Chrome with AIHub overlay installed and launched."
