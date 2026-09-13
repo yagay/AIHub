@@ -45,8 +45,6 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
         for (AiProviderAdapter adapter : providers.all()) specs.add(adapter.spec());
         screen.setProviders(specs);
 
-        // Start with the complete official website. APP mode is enabled only after the live page
-        // confirms that its composer is controllable through the shared bridge.
         preferences.setAppModeEnabled(false);
         screen.showAppMode(false);
 
@@ -101,6 +99,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
         sessions.setAppModeEnabled(!sessions.isAppModeEnabled());
     }
 
+    @Override public void onProviderAction(String actionId) { sessions.triggerProviderAction(actionId); }
     @Override public void onNewChat() { sessions.newChat(); }
     @Override public void onReload() { sessions.reload(); }
     @Override public void onStop() { sessions.stopGeneration(); }
