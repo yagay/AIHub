@@ -1,13 +1,15 @@
 package com.yagay.aihub.core.runtime;
 
-import com.yagay.aihub.core.AiAccount;
 import com.yagay.aihub.core.AiSessionKey;
 import com.yagay.aihub.core.ProviderConfig;
 import java.util.List;
 
-/** Browser-specific implementation. The business/core layer never references Chromium directly. */
+/**
+ * Stable browser boundary. Core/UI code depends only on this interface; Chromium-specific APIs stay
+ * behind the adapter in chromium-overlay.
+ */
 public interface SessionRuntime {
-    void open(AiSessionKey key, ProviderConfig provider, AiAccount account);
+    void open(AiSessionKey key, ProviderConfig provider);
     void activate(AiSessionKey key);
     void close(AiSessionKey key);
     void sendText(AiSessionKey key, String text);
