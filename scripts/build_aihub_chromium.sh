@@ -12,10 +12,10 @@ AIHUB_SOURCE="$(cd "$(dirname "$0")/.." && pwd)"
 
 python3 "$AIHUB_SOURCE/scripts/validate_provider_rules.py"
 python3 "$AIHUB_SOURCE/scripts/validate_repo.py"
-"$AIHUB_SOURCE/scripts/run_core_smoke_test.sh"
+bash "$AIHUB_SOURCE/scripts/run_core_smoke_test.sh"
 python3 "$AIHUB_SOURCE/scripts/check_chromium_checkout.py" "$CHROMIUM_SRC"
 
-"$AIHUB_SOURCE/scripts/sync_to_chromium.sh" "$CHROMIUM_SRC"
+bash "$AIHUB_SOURCE/scripts/sync_to_chromium.sh" "$CHROMIUM_SRC"
 cd "$CHROMIUM_SRC"
 
 if [[ ! -d "$OUT" || ! -f "$OUT/args.gn" ]]; then
@@ -38,7 +38,6 @@ if ! command -v gn >/dev/null 2>&1; then
   exit 6
 fi
 
-# Fail before the expensive build if the synced GN target cannot be resolved.
 gn desc "$OUT" //aihub/chromium-overlay:aihub_apk >/dev/null
 
 echo "Building AIHub + local WebEngine support..."
