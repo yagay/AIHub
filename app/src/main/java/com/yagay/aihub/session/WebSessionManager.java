@@ -65,6 +65,7 @@ public final class WebSessionManager {
     private final GeckoFilePicker filePicker;
 
     private SessionKey currentKey;
+    private boolean appModeRequested;
     private boolean appModeEnabled;
     private long requestSequence;
 
@@ -81,6 +82,7 @@ public final class WebSessionManager {
     }
 
     public void switchTo(AiProviderAdapter adapter, AccountProfile account, String contextId) {
+        appModeRequested = false;
         setActualAppMode(false);
         SessionKey key = new SessionKey(adapter.spec().id(), account.id());
         Session session = sessions.get(key);
@@ -93,7 +95,6 @@ public final class WebSessionManager {
         currentKey = key;
         attachToView(session.geckoSession);
         events.onConversationChanged(session.lastMessages);
-        if (session.bridgePort != null && isTrusted(session)) requestProbe(session);
     }
 
     public void send(String text) {
@@ -140,19 +141,24 @@ public final class WebSessionManager {
 
     public void setAppModeEnabled(boolean enabled) {
         if (!enabled) {
+            appModeRequested = false;
             setActualAppMode(false);
             return;
         }
+
         Session session = current();
         if (session == null) return;
         if (!isTrusted(session)) {
+            appModeRequested = false;
             setActualAppMode(false);
             events.onMessage("Finish sign-in in WEB mode first.");
             return;
         }
+
+        appModeRequested = true;
         if (session.bridgePort == null) {
             setActualAppMode(false);
-            events.onMessage("This page is not ready for APP mode yet.");
+            events.onMessage("The page is still loading. APP mode will remain off until the page bridge is ready.");
             return;
         }
         requestProbe(session);
@@ -168,6 +174,8 @@ public final class WebSessionManager {
         for (Session session : sessions.values()) destroySession(session);
         sessions.clear();
         currentKey = null;
+        appModeRequested = false;
+        appModeEnabled = false;
     }
 
     private void createSession(Session holder) {
@@ -188,7 +196,11 @@ public final class WebSessionManager {
                 destroySession(holder);
                 createSession(holder);
                 holder.geckoSession.loadUri(target);
-                if (selected) attachToView(holder.geckoSession);
+                if (selected) {
+                    appModeRequested = false;
+                    setActualAppMode(false);
+                    attachToView(holder.geckoSession);
+                }
                 events.onMessage("Browser process restarted");
             }
         });
@@ -202,7 +214,10 @@ public final class WebSessionManager {
                     Boolean hasUserGesture) {
                 holder.lastUrl = url;
                 holder.appCapable = false;
-                if (holder.key.equals(currentKey)) setActualAppMode(false);
+                if (holder.key.equals(currentKey)) {
+                    if (!holder.adapter.spec().ownsUrl(url)) appModeRequested = false;
+                    setActualAppMode(false);
+                }
             }
 
             @Override
@@ -215,9 +230,9 @@ public final class WebSessionManager {
                     GeckoSession changed,
                     GeckoSession.NavigationDelegate.LoadRequest request) {
                 Uri uri = safeUri(request.uri);
-                if (uri != null && request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW
-                        && request.hasUserGesture) {
-                    changed.loadUri(request.uri);
+                if (uri != null && request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW) {
+                    if (isWebScheme(uri)) changed.loadUri(request.uri);
+                    else openExternal(uri);
                     return GeckoResult.deny();
                 }
                 if (uri != null && !isWebScheme(uri)) {
@@ -233,7 +248,9 @@ public final class WebSessionManager {
             public void onPageStop(GeckoSession loaded, boolean success) {
                 if (!holder.key.equals(currentKey)) return;
                 events.onPageReady();
-                if (success && holder.bridgePort != null && isTrusted(holder)) requestProbe(holder);
+                if (success && appModeRequested && holder.bridgePort != null && isTrusted(holder)) {
+                    requestProbe(holder);
+                }
             }
         });
 
@@ -309,7 +326,9 @@ public final class WebSessionManager {
                                 if (source == holder.bridgePort) holder.bridgePort = null;
                             }
                         });
-                        if (holder.key.equals(currentKey) && isTrusted(holder)) requestProbe(holder);
+                        if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) {
+                            requestProbe(holder);
+                        }
                     }
                 },
                 () -> {},
@@ -322,7 +341,7 @@ public final class WebSessionManager {
         if (!url.isBlank()) holder.lastUrl = url;
 
         if (type.equals("ready") || type.equals("location")) {
-            if (holder.key.equals(currentKey) && isTrusted(holder)) requestProbe(holder);
+            if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) requestProbe(holder);
             return;
         }
 
@@ -336,11 +355,12 @@ public final class WebSessionManager {
         if (action.equals("probe")) {
             boolean capable = message.optBoolean("ok", false) && message.optBoolean("composer", false);
             holder.appCapable = capable;
-            if (!holder.key.equals(currentKey)) return;
+            if (!holder.key.equals(currentKey) || !appModeRequested) return;
             if (capable) {
                 setActualAppMode(true);
                 requestSync(holder);
             } else {
+                appModeRequested = false;
                 setActualAppMode(false);
                 events.onMessage("APP mode is not available on this page. Stay in WEB mode for sign-in or unsupported pages.");
             }
@@ -359,6 +379,7 @@ public final class WebSessionManager {
         }
 
         if (!message.optBoolean("ok", false) && holder.key.equals(currentKey)) {
+            appModeRequested = false;
             events.onMessage("The website control changed. Use WEB mode and update this provider's selectors.");
             setActualAppMode(false);
         }
