@@ -1,56 +1,72 @@
 # AIHub
 
-AIHub is a Chromium WebEngine-based Android shell for using multiple AI websites through one shared interface, while keeping provider differences in rules instead of duplicating an app implementation per AI.
+AIHub is an Android multi-AI browser shell built on Chromium WebEngine. The goal is to keep Chromium's web/runtime capability while replacing the normal browser UI with an interface optimized for switching between AI websites.
 
 Built-in provider rules currently include ChatGPT, Claude, Gemini, Grok and DeepSeek. Custom AI websites can also be added from the app.
 
-## Core design
+## Product direction
+
+AIHub intentionally does **not** manage multiple accounts or workspaces. Each AI provider owns one long-lived Chromium profile/session. The user logs in on the real website, and AIHub simply retains that browser state.
 
 ```text
-UI / Share / Intent / Binder / Deep Link
-                 ↓
-            AiCommandBus
-                 ↓
-           SessionManager
-                 ↓
-      WebEngineSessionRuntime
-                 ↓
-        Chromium WebEngine
-                 ↓
-     Generic DOM rule engine
+AI-first UI / Share / Intent / Binder / Deep Link
+                         ↓
+                    AiCommandBus
+                         ↓
+                   SessionManager
+                         ↓
+              SessionRuntime interface
+                         ↓
+             WebEngineSessionRuntime
+                         ↓
+                 AiWebEngineHost
+                         ↓
+                 Chromium WebEngine
 ```
 
-Provider-specific branches are intentionally kept out of the stable core. Provider differences live in JSON rules, with signed rule bundles available for post-APK selector updates.
+The stable core has no Chromium dependency. Direct `org.chromium.webengine.*` usage is restricted to two integration files:
 
-## Implemented
+```text
+chromium-overlay/.../WebEngineSessionRuntime.java
+chromium-overlay/.../AiWebEngineHost.java
+```
 
-- unified provider switcher and previous/next AI switching
-- one shared composer, new-chat, stop, back, forward and reload controls
-- multiple isolated accounts per AI using separate WebEngine profile names
-- Personal/Work-style workspace mappings across providers
-- account/workspace add, rename and safe removal flows
-- retained session/persistence IDs
-- Android file picker and multi-file attachment bridge
-- attach-then-send ordering for shares containing both files and prompt text
-- custom AI websites
-- provider diagnostics and JSON diagnostics export without cookies/tokens/site storage
-- JSON provider rules and selector health probing
-- Ed25519-signed provider rule bundles with versioning and rollback
-- token-gated unattended Intent and AIDL/Binder integrations
-- tokenless deep links with explicit user confirmation
-- Android share confirmation before using a logged-in AI session
-- guarded exported `AiHubEntryActivity`; the real `AiHubShellActivity` is unexported
-- GitHub Actions validation and core smoke tests
+When Chromium changes, adapt those integration points instead of rewriting AIHub's provider/session/UI logic.
+
+## AI-first UI
+
+The shell is designed around AI switching rather than normal tab/account management:
+
+- horizontal AI quick-switch rail always visible above the page
+- one retained page/session per AI provider
+- current AI title in the top browser bar
+- browser back / forward / reload retained
+- one-tap new chat
+- shared attachment control
+- shared composer and send button
+- stop-generation control
+- add custom AI website
+- diagnostics/rule tools kept behind the tools menu
+
+Switching AI activates its existing Chromium surface instead of rebuilding or reloading it whenever possible.
+
+## Browser capability policy
+
+AIHub does not fork provider websites or replace their login systems. Website rendering, cookies, local storage, IndexedDB, navigation and browser state remain owned by Chromium/WebEngine.
+
+The long-term rule is: keep browser capabilities in the Chromium integration layer and replace only the shell/UI. Features such as downloads, permissions, camera/microphone, file handling and crash/session restoration should be implemented through the Chromium adapter boundary rather than duplicated in provider-specific code.
 
 ## Repository layout
 
 ```text
-aihub-core/          provider/account/workspace/session/command core
-chromium-overlay/    Android UI + all org.chromium.webengine integration
-android-api/         public third-party contract/AIDL
-docs/                architecture, build and roadmap notes
+aihub-core/          provider/session/command core; no Android or Chromium dependency
+chromium-overlay/    Android AI UI + the small Chromium integration seam
+android-api/         provider-only third-party API/AIDL
+docs/                architecture, Chromium integration and roadmap
 scripts/             validation, Chromium sync/build/install and rule signing
 ```
+
+Provider differences live in JSON rules, with signed rule bundles available for selector updates without changing the stable core.
 
 ## Verify without Chromium
 
@@ -60,17 +76,22 @@ python3 scripts/validate_repo.py
 bash scripts/run_core_smoke_test.sh
 ```
 
-GitHub Actions runs the same stable-core checks on every push and pull request.
+CI also enforces these architecture rules:
+
+- no account/workspace model may re-enter active source
+- direct WebEngine imports may exist only in the two Chromium adapter files
+- `AiHubShellActivity` remains unexported
+- deep links never carry the reusable client token
 
 ## Chromium development build
 
-AIHub is designed to live at `//aihub` inside a Chromium Android checkout. Configure an Android GN output directory first, for example:
+AIHub is designed to live at `//aihub` inside a Chromium Android checkout. Configure an Android GN output directory first:
 
 ```text
 target_os = "android"
 ```
 
-Then use the one-command development flow:
+Then run:
 
 ```bash
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
@@ -82,42 +103,34 @@ With multiple devices connected:
 bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
 ```
 
-The script performs repository validation, WebEngine API compatibility checks, syncs AIHub into the Chromium checkout, resolves the GN target, builds AIHub plus the local WebEngine support target, installs the produced APKs, and launches the guarded entry activity.
-
-Manual build-only and install-only commands are also available:
-
-```bash
-bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
-bash scripts/install_aihub_local.sh /path/to/chromium/src out/Default
-```
+The flow validates the repository, checks the selected Chromium WebEngine API, syncs AIHub into the checkout, resolves the GN target, builds AIHub plus the local WebEngine support target, installs the APKs and launches the guarded entry Activity.
 
 ## Third-party calls
 
-Unattended external actions use the local client token shown under AIHub Tools. Put that token in Intent extras or use the token-gated Binder API; do not put the token in URLs.
+External targeting is provider-only. There is no account/workspace API.
 
-Automatic Intent example:
+Unattended actions use the local client token in Intent extras or Binder:
 
 ```bash
 adb shell am start \
   -n com.yagay.aihub/com.yagay.aihub.chromium.AiHubEntryActivity \
   -a com.yagay.aihub.action.SEND_TEXT \
+  --es provider_id claude \
   --es text "Explain this code" \
   --es client_token YOUR_TOKEN
 ```
 
-Deep links are intentionally tokenless and require user confirmation:
+Deep links are tokenless and require user confirmation:
 
 ```text
 aihub://send?provider=gemini&text=hello
 ```
 
-Ordinary Android shares also require user confirmation. Third-party integrations never receive WebEngine cookies, login tokens, localStorage or IndexedDB data.
+Third-party integrations never receive Chromium cookies, login tokens, localStorage or IndexedDB.
 
 ## Signed provider rules
 
-Provider selectors can be updated without changing the stable app core. AIHub accepts only Ed25519-signed rule bundles when a public key has explicitly been packaged in `chromium-overlay/assets/aihub/rules_public_key.txt`.
-
-Create a signed bundle with:
+Provider selectors can be updated without changing the stable app core. AIHub accepts only Ed25519-signed rule bundles when a public key is packaged in `chromium-overlay/assets/aihub/rules_public_key.txt`.
 
 ```bash
 python3 scripts/build_signed_rule_bundle.py \
@@ -127,8 +140,6 @@ python3 scripts/build_signed_rule_bundle.py \
   --output provider-rules-v2.json
 ```
 
-`openssl` must be available in `PATH`. If no public key is configured, signed-rule installation remains disabled rather than falling back to unsigned updates.
+## Verification boundary
 
-## Current verification boundary
-
-The stable core, provider rules, repository wiring and security invariants are continuously verified by CI. A complete Chromium `autoninja` build and on-device WebEngine test still requires a real Chromium Android checkout and device; this repository does not pretend that CI's Java smoke test is a substitute for that integration build.
+The provider-only core, rule tooling, repository wiring and architecture invariants are verified by CI. A complete Chromium `autoninja` build and real-device browser test still requires a compatible Chromium Android checkout and device.
