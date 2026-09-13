@@ -13,22 +13,17 @@ import androidx.annotation.Nullable;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
-import com.yagay.aihub.bridge.AiHubJsBridge;
-import com.yagay.aihub.browser.BrowserEngine;
-
-/** Hosts the static NextChat build. WebView renders UI only; AI websites run in external Chrome. */
+/** Hosts the static NextChat build. AI requests go directly to the app-private localhost gateway. */
 public final class UiHost {
     private static final String UI_URL = "https://appassets.androidplatform.net/assets/ui/index.html";
 
     private final ComponentActivity activity;
     private final WebView webView;
-    private final AiHubJsBridge bridge;
     private String pendingSharedText;
 
-    public UiHost(ComponentActivity activity, BrowserEngine engine) {
+    public UiHost(ComponentActivity activity) {
         this.activity = activity;
         this.webView = new WebView(activity);
-        this.bridge = new AiHubJsBridge(webView, engine);
 
         WebView.setWebContentsDebuggingEnabled(false);
         WebSettings settings = webView.getSettings();
@@ -37,7 +32,9 @@ public final class UiHost {
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // The UI is served from appassets HTTPS while the embedded gateway is loopback HTTP.
+        // Cleartext is accepted only so NextChat can reach 127.0.0.1:3456 inside this app.
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(activity))
@@ -63,12 +60,10 @@ public final class UiHost {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                bridge.emitReady();
                 applyPendingSharedText();
             }
         });
         webView.setWebChromeClient(new WebChromeClient());
-        webView.addJavascriptInterface(bridge, "AIHubNative");
     }
 
     public WebView view() {
@@ -106,12 +101,10 @@ public final class UiHost {
     }
 
     public void destroy() {
-        webView.removeJavascriptInterface("AIHubNative");
         webView.stopLoading();
         webView.destroy();
     }
 
-    /** Avoid a dependency from UI host to org.json just to quote one JS string. */
     private static final class JSONObjectQuote {
         static String quote(String value) {
             return org.json.JSONObject.quote(value == null ? "" : value);
