@@ -1,123 +1,67 @@
 [
   {
     "id": "chatgpt",
+    "model": "chatgpt-web",
     "name": "ChatGPT",
     "homeUrl": "https://chatgpt.com/",
     "hosts": ["chatgpt.com"],
     "selectors": {
-      "input": ["#prompt-textarea", "[data-testid='prompt-textarea']", "div#prompt-textarea[contenteditable='true']", "textarea[name='prompt-textarea']", "textarea"],
+      "input": ["#prompt-textarea", "div#prompt-textarea[contenteditable='true']", "textarea[name='prompt-textarea']"],
       "send": ["button[data-testid='send-button']", "button[aria-label*='Send']"],
-      "newChat": ["a[href='/']", "button[aria-label*='New chat']"],
       "stop": ["button[data-testid='stop-button']", "button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
-    },
-    "ui": {
-      "hide": ["header", "[role='banner']"],
-      "actions": [
-        {"id":"history","label":"History","selectors":["button[data-testid='open-sidebar-button']","button[aria-label*='sidebar']","button[aria-label*='History']"],"keywords":["sidebar","history"]},
-        {"id":"model","label":"Model","selectors":["button[data-testid='model-switcher-dropdown-button']","button[aria-label*='model']"],"keywords":["model","gpt"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[data-testid='copy-turn-action-button']","button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Regenerate","pick":"last","selectors":["button[data-testid='regenerate-turn-action-button']","button[aria-label='Regenerate']","button[aria-label*='Regenerate']","button[aria-label*='Retry']"],"keywords":["regenerate","retry","try again"]},
-        {"id":"account","label":"Account","selectors":["button[data-testid='profile-button']","button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
-        {"id":"more","label":"More","selectors":["button[aria-label='More']","button[aria-label*='More']"],"keywords":["more"]}
-      ]
+      "assistant": ["[data-message-author-role='assistant']", "article[data-turn='assistant'] .markdown", "article[data-turn='assistant']"]
     }
   },
   {
     "id": "claude",
+    "model": "claude-web",
     "name": "Claude",
     "homeUrl": "https://claude.ai/new",
     "hosts": ["claude.ai"],
     "selectors": {
-      "input": ["[data-testid='chat-input']", ".ProseMirror[contenteditable='true']", "div[contenteditable='true']", "fieldset textarea", "textarea"],
-      "send": ["button[aria-label='Send Message']", "button[aria-label*='Send']", "button[data-testid='send-button']", "button[type='submit']"],
-      "newChat": ["a[href='/new']", "button[aria-label*='New']"],
+      "input": ["[data-testid='chat-input']", ".ProseMirror[contenteditable='true']", "div[contenteditable='true'][role='textbox']"],
+      "send": ["button[aria-label='Send Message']", "button[aria-label*='Send']", "button[data-testid='send-button']"],
       "stop": ["button[aria-label='Stop Response']", "button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
-    },
-    "ui": {
-      "hide": ["header", "[role='banner']"],
-      "actions": [
-        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
-        {"id":"model","label":"Model","selectors":["button[data-testid*='model']","button[aria-label*='model']"],"keywords":["model","claude"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Retry","pick":"last","selectors":["button[aria-label='Retry']","button[aria-label*='Retry']","button[aria-label*='Regenerate']"],"keywords":["retry","regenerate","try again"]},
-        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
-        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
-      ]
+      "assistant": ["div[data-testid*='assistant']", "div.font-claude-response-body", ".font-claude-response-body", "main .prose"]
     }
   },
   {
     "id": "gemini",
+    "model": "gemini-web",
     "name": "Gemini",
     "homeUrl": "https://gemini.google.com/app",
     "hosts": ["gemini.google.com"],
     "selectors": {
-      "input": [".ql-editor[contenteditable='true']", "div[contenteditable='true'][role='textbox']", "div[contenteditable='true']", "textarea"],
-      "send": ["button[aria-label*='Send']", "button[aria-label*='submit']", "button[type='submit']"],
-      "newChat": ["a[href='/app']", "button[aria-label*='New chat']"],
+      "input": ["div.ql-editor", "rich-textarea [contenteditable='true']", "[aria-label='Enter a prompt here']", "[contenteditable='true'][role='textbox']"],
+      "send": ["button[aria-label='Send message']", "button[aria-label*='Send']", ".send-button", "button.send-button"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Upload']", "button[aria-label*='Add files']"]
-    },
-    "ui": {
-      "hide": ["header", "[role='banner']"],
-      "actions": [
-        {"id":"history","label":"History","selectors":["button[aria-label*='Main menu']","button[aria-label*='menu']"],"keywords":["menu","history","sidebar"]},
-        {"id":"model","label":"Model","selectors":["button[aria-label*='model']","button[data-test-id*='model']"],"keywords":["model","gemini"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-test-id*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Regenerate","pick":"last","selectors":["button[aria-label*='Regenerate']","button[aria-label*='Retry']"],"keywords":["regenerate","retry"]},
-        {"id":"account","label":"Account","selectors":["button[aria-label*='Google Account']","a[aria-label*='Google Account']"],"keywords":["google account","account"]},
-        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
-      ]
-    }
-  },
-  {
-    "id": "grok",
-    "name": "Grok",
-    "homeUrl": "https://grok.com/",
-    "hosts": ["grok.com"],
-    "selectors": {
-      "input": ["[data-testid='chat-input']", "div.ProseMirror[role='textbox']", "div.ProseMirror[contenteditable='true']", "textarea", "div[contenteditable='true']"],
-      "send": ["button[aria-label*='Send']", "button[type='submit']"],
-      "newChat": ["[data-testid='new-chat']", "a[href='/']", "button[aria-label*='New']"],
-      "stop": ["button[aria-label*='Stop']"],
-      "attach": ["[data-testid='attach-button']", "input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
-    },
-    "ui": {
-      "hide": ["header", "[role='banner']"],
-      "actions": [
-        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
-        {"id":"model","label":"Mode","selectors":["button[aria-label*='model']","button[aria-label*='mode']"],"keywords":["model","mode"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Retry","pick":"last","selectors":["button[aria-label*='Retry']","button[aria-label*='Regenerate']"],"keywords":["retry","regenerate"]},
-        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
-        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
-      ]
+      "assistant": ["model-response", "message-content", ".model-response-text", ".response-content"]
     }
   },
   {
     "id": "deepseek",
+    "model": "deepseek-web",
     "name": "DeepSeek",
     "homeUrl": "https://chat.deepseek.com/",
     "hosts": ["chat.deepseek.com"],
     "selectors": {
-      "input": ["textarea[placeholder='Message DeepSeek']", "textarea", "div[contenteditable='true'][role='textbox']", "div[contenteditable='true']"],
+      "input": ["textarea[placeholder*='DeepSeek']", "textarea", "div[contenteditable='true'][role='textbox']"],
+      "send": ["button[aria-label*='Send']", "button[type='submit']", "div[role='button'][aria-label*='Send']"],
+      "stop": ["button[aria-label*='Stop']", "div[role='button'][aria-label*='Stop']"],
+      "assistant": [".ds-markdown", "[class*='ds-markdown']", "[data-role='assistant']", "main .markdown"]
+    }
+  },
+  {
+    "id": "grok",
+    "model": "grok-web",
+    "name": "Grok",
+    "homeUrl": "https://grok.com/",
+    "hosts": ["grok.com"],
+    "selectors": {
+      "input": ["[data-testid='chat-input']", "div.ProseMirror[role='textbox']", "div.ProseMirror[contenteditable='true']", "textarea", "div[contenteditable='true'][role='textbox']"],
       "send": ["button[aria-label*='Send']", "button[type='submit']"],
-      "newChat": ["button[aria-label*='New']", "a[href='/']"],
       "stop": ["button[aria-label*='Stop']"],
-      "attach": ["input[type='file']", "button[aria-label*='Attach']", "button[aria-label*='Upload']"]
-    },
-    "ui": {
-      "hide": ["header", "[role='banner']"],
-      "actions": [
-        {"id":"history","label":"History","selectors":["button[aria-label*='sidebar']","button[aria-label*='menu']"],"keywords":["sidebar","history","menu"]},
-        {"id":"deepthink","label":"DeepThink","selectors":["button[aria-label*='DeepThink']"],"keywords":["deepthink","deep think"]},
-        {"id":"search","label":"Search","selectors":["button[aria-label*='Search']"],"keywords":["search"]},
-        {"id":"copy","label":"Copy","pick":"last","selectors":["button[aria-label*='Copy']","button[data-testid*='copy']"],"keywords":["copy"]},
-        {"id":"retry","label":"Retry","pick":"last","selectors":["button[aria-label*='Retry']","button[aria-label*='Regenerate']"],"keywords":["retry","regenerate"]},
-        {"id":"account","label":"Account","selectors":["button[aria-label*='profile']","button[aria-label*='account']"],"keywords":["profile","account"]},
-        {"id":"more","label":"More","selectors":["button[aria-label*='More']"],"keywords":["more"]}
-      ]
+      "assistant": ["[data-testid*='assistant']", "[data-message-author-role='assistant']", "div[class*='message-bubble'] .prose", "main .prose"]
     }
   }
 ]

@@ -7,27 +7,30 @@ import android.view.View;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 
-import com.yagay.aihub.ui.MainController;
+import com.yagay.aihub.browser.ChromeCdpEngine;
+import com.yagay.aihub.ui.UiHost;
 
-/** Thin Android lifecycle entry point. All app behavior lives behind MainController. */
+/** Android lifecycle shell. The chat UI is NextChat; native code owns browser automation only. */
 public final class MainActivity extends ComponentActivity {
-    private MainController controller;
+    private ChromeCdpEngine browserEngine;
+    private UiHost uiHost;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        controller = new MainController(this);
-        View root = controller.screen().root();
+        browserEngine = new ChromeCdpEngine(this);
+        uiHost = new UiHost(this, browserEngine);
+        View root = uiHost.view();
         root.setFitsSystemWindows(true);
         setContentView(root);
-        controller.start();
-        controller.handleIntent(getIntent());
+        uiHost.start();
+        uiHost.handleIntent(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (controller != null && controller.handleBack()) return;
+                if (uiHost != null && uiHost.handleBack()) return;
                 setEnabled(false);
                 getOnBackPressedDispatcher().onBackPressed();
                 setEnabled(true);
@@ -39,13 +42,15 @@ public final class MainActivity extends ComponentActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (controller != null) controller.handleIntent(intent);
+        if (uiHost != null) uiHost.handleIntent(intent);
     }
 
     @Override
     protected void onDestroy() {
-        if (controller != null) controller.destroy();
-        controller = null;
+        if (uiHost != null) uiHost.destroy();
+        if (browserEngine != null) browserEngine.shutdown();
+        uiHost = null;
+        browserEngine = null;
         super.onDestroy();
     }
 }

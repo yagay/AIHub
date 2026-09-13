@@ -18,8 +18,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 28
         targetSdk = 36
-        versionCode = aihubVersionCode ?: 3
-        versionName = aihubVersionName ?: "0.3.0"
+        versionCode = aihubVersionCode ?: 4
+        versionName = aihubVersionName ?: "0.4.0"
 
         aihubAbi?.takeIf { it.isNotBlank() }?.let { abi ->
             ndk {
@@ -42,5 +42,6 @@ android {
 
 dependencies {
     implementation("androidx.activity:activity:1.13.0")
-    implementation("org.mozilla.geckoview:geckoview-nightly:158.0.20260911092915")
+    implementation("androidx.webkit:webkit:1.14.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
