@@ -24,6 +24,8 @@ public final class AiHubStateStore {
     private static final String KEY_ACCOUNTS = "accounts_json";
     private static final String KEY_WORKSPACES = "workspaces_json";
     private static final String KEY_CUSTOM_PROVIDERS = "custom_provider_rules_json";
+    private static final String KEY_REMOTE_RULE_BUNDLE = "remote_rule_bundle";
+    private static final String KEY_PREVIOUS_REMOTE_RULE_BUNDLE = "previous_remote_rule_bundle";
     private static final String KEY_PROVIDER = "current_provider";
     private static final String KEY_ACCOUNT = "current_account";
     private static final String KEY_WORKSPACE = "current_workspace";
@@ -144,6 +146,38 @@ public final class AiHubStateStore {
         JSONArray array = new JSONArray();
         for (String rule : rules) array.put(rule);
         prefs.edit().putString(KEY_CUSTOM_PROVIDERS, array.toString()).apply();
+    }
+
+    public String remoteRuleBundle() {
+        return prefs.getString(KEY_REMOTE_RULE_BUNDLE, null);
+    }
+
+    public void installRemoteRuleBundle(String verifiedEnvelope) {
+        String current = remoteRuleBundle();
+        SharedPreferences.Editor editor = prefs.edit();
+        if (current == null || current.isBlank()) editor.remove(KEY_PREVIOUS_REMOTE_RULE_BUNDLE);
+        else editor.putString(KEY_PREVIOUS_REMOTE_RULE_BUNDLE, current);
+        editor.putString(KEY_REMOTE_RULE_BUNDLE, verifiedEnvelope).apply();
+    }
+
+    public boolean canRollbackRemoteRuleBundle() {
+        String previous = prefs.getString(KEY_PREVIOUS_REMOTE_RULE_BUNDLE, null);
+        return previous != null && !previous.isBlank();
+    }
+
+    public boolean rollbackRemoteRuleBundle() {
+        String previous = prefs.getString(KEY_PREVIOUS_REMOTE_RULE_BUNDLE, null);
+        if (previous == null || previous.isBlank()) return false;
+        String current = remoteRuleBundle();
+        SharedPreferences.Editor editor = prefs.edit().putString(KEY_REMOTE_RULE_BUNDLE, previous);
+        if (current == null || current.isBlank()) editor.remove(KEY_PREVIOUS_REMOTE_RULE_BUNDLE);
+        else editor.putString(KEY_PREVIOUS_REMOTE_RULE_BUNDLE, current);
+        editor.apply();
+        return true;
+    }
+
+    public void clearRemoteRuleBundle() {
+        prefs.edit().remove(KEY_REMOTE_RULE_BUNDLE).remove(KEY_PREVIOUS_REMOTE_RULE_BUNDLE).apply();
     }
 
     public void saveCurrent(AiSessionKey key) {
