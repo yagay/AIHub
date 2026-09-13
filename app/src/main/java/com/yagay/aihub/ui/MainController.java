@@ -30,7 +30,7 @@ public final class MainController implements MainScreen.Callback, WebSessionMana
 
     public MainController(Activity activity) {
         this.activity = activity;
-        providers = new ProviderRegistry();
+        providers = new ProviderRegistry(activity);
         accounts = new AccountRepository(activity);
         preferences = new AppPreferences(activity);
         screen = new MainScreen(activity, this);
