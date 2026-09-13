@@ -3,38 +3,56 @@ import argparse
 import pathlib
 import sys
 
-# Keep this list synchronized with the direct upstream calls in AiWebEngineHost.java. If a future
-# Chromium revision changes these APIs, the compatibility check should fail before GN compilation.
+# Keep this synchronized with AiHubChromeBridge.java and apply_chrome_overlay.py. The checker is
+# intentionally symbol-based: it should fail early when Chromium moves one of our few hook points.
 REQUIRED_FILES = {
-    "Tab": "weblayer/public/java/org/chromium/webengine/Tab.java",
-    "NavigationController": "weblayer/public/java/org/chromium/webengine/NavigationController.java",
-    "FragmentParams": "weblayer/public/java/org/chromium/webengine/FragmentParams.java",
-    "WebSandbox": "weblayer/public/java/org/chromium/webengine/WebSandbox.java",
-    "TabManager": "weblayer/public/java/org/chromium/webengine/TabManager.java",
-    "WebFragment": "weblayer/public/java/org/chromium/webengine/WebFragment.java",
+    "ChromeTabbedActivity": "chrome/android/java/src/org/chromium/chrome/browser/ChromeTabbedActivity.java",
+    "ChromeActivity": "chrome/android/java/src/org/chromium/chrome/browser/app/ChromeActivity.java",
+    "Tab": "chrome/browser/tab/java/src/org/chromium/chrome/browser/tab/Tab.java",
+    "TabModelSelector": "chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelSelector.java",
+    "TabModelUtils": "chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabModelUtils.java",
+    "TabCreator": "chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabCreator.java",
+    "TabClosureParams": "chrome/browser/tabmodel/android/java/src/org/chromium/chrome/browser/tabmodel/TabClosureParams.java",
+    "WebContents": "content/public/android/java/src/org/chromium/content_public/browser/WebContents.java",
+    "RenderFrameHost": "content/public/android/java/src/org/chromium/content_public/browser/RenderFrameHost.java",
+    "IsolatedWorldIds": "content/public/android/java/src/org/chromium/content_public/common/IsolatedWorldIds.java",
+    "ChromeJavaSources": "chrome/android/chrome_java_sources.gni",
 }
 
 REQUIRED_SYMBOLS = {
-    "Tab": ["executeScript(", "getNavigationController(", "setActive(", "getDisplayUri("],
-    "NavigationController": ["navigate(", "goBack(", "goForward(", "reload("],
-    "FragmentParams": ["setProfileName(", "setPersistenceId("],
-    "WebSandbox": ["create(", "createFragment("],
-    "TabManager": ["getActiveTab(", "createTab("],
-    "WebFragment": ["getTabManager("],
+    "ChromeTabbedActivity": [
+        "performPostInflationStartup()",
+        "mControlContainer = findViewById(R.id.control_container);",
+    ],
+    "ChromeActivity": ["getTabModelSelector(", "getTabCreator("],
+    "Tab": [
+        "getWebContents(", "getUrl(", "reload(", "stopLoading(", "isLoading(",
+        "getProgress(", "canGoBack(", "goBack(", "canGoForward(", "goForward(",
+    ],
+    "TabModelSelector": [
+        "getCurrentTab(", "getTabById(", "selectModel(", "tryCloseTab(",
+    ],
+    "TabModelUtils": ["runOnTabStateInitialized(", "selectTabById("],
+    "TabCreator": ["createNewTab("],
+    "TabClosureParams": ["closeTab(", "allowUndo("],
+    "WebContents": ["getMainFrame("],
+    "RenderFrameHost": ["executeJavaScriptInIsolatedWorld("],
+    "IsolatedWorldIds": ["ISOLATED_WORLD_ID_MAX"],
+    "ChromeJavaSources": ["chrome_java_sources = ["],
 }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Check a Chromium src checkout against the exact WebEngine surface AIHub uses"
+        description="Check a Chromium src checkout against AIHub's Chrome Android seam"
     )
     parser.add_argument("chromium_src", help="Path to Chromium src directory")
     args = parser.parse_args()
     root = pathlib.Path(args.chromium_src).resolve()
     errors = []
 
-    if not (root / "BUILD.gn").is_file() or not (root / "weblayer").is_dir():
-        errors.append(f"{root} does not look like a Chromium src checkout with //weblayer")
+    if not (root / "BUILD.gn").is_file() or not (root / "chrome" / "android").is_dir():
+        errors.append(f"{root} does not look like a Chromium src checkout with //chrome/android")
 
     texts = {}
     for name, relative in REQUIRED_FILES.items():
@@ -48,43 +66,27 @@ def main():
         text = texts.get(name, "")
         for symbol in symbols:
             if symbol not in text:
-                errors.append(f"{REQUIRED_FILES[name]}: missing expected API {symbol}")
+                errors.append(f"{REQUIRED_FILES[name]}: missing expected API/anchor {symbol}")
 
-    public_build = root / "weblayer/public/java/BUILD.gn"
-    if public_build.is_file():
-        text = public_build.read_text(encoding="utf-8", errors="replace")
-        if "webengine_java" not in text:
-            errors.append("//weblayer/public/java no longer exposes webengine_java")
-    else:
-        errors.append("missing weblayer/public/java/BUILD.gn")
-
-    support_build = root / "weblayer/shell/android/BUILD.gn"
-    if support_build.is_file():
-        text = support_build.read_text(encoding="utf-8", errors="replace")
-        if "weblayer_support_apk" not in text:
-            errors.append("//weblayer/shell/android no longer exposes weblayer_support_apk")
-    else:
-        errors.append("missing weblayer/shell/android/BUILD.gn")
-
-    android_rules = root / "build/config/android/rules.gni"
-    if not android_rules.is_file():
-        errors.append("missing build/config/android/rules.gni")
+    # WebLayer/WebEngine was removed from current Chromium and must not become a requirement again.
+    if (root / "weblayer" / "public" / "java").exists():
+        print("note: checkout still contains legacy //weblayer; AIHub intentionally does not use it")
 
     if errors:
         print("AIHub Chromium compatibility check FAILED:")
         for error in errors:
             print(" -", error)
         print("\nExpected maintenance boundary:")
-        print("  1. chromium-overlay/java/com/yagay/aihub/chromium/AiWebEngineHost.java")
-        print("  2. chromium-overlay/BUILD.gn if upstream target names move")
-        print("  3. this compatibility checker")
-        print("Keep aihub-core, AI UI and provider rules independent from Chromium revision changes.")
+        print("  1. chromium-overlay/java/com/yagay/aihub/chromium/AiHubChromeBridge.java")
+        print("  2. scripts/apply_chrome_overlay.py (one ChromeTabbedActivity hook + source list)")
+        print("  3. scripts/check_chromium_checkout.py")
+        print("Keep aihub-core, aihub-android UI/runtime and provider rules revision-independent.")
         sys.exit(1)
 
-    print("AIHub Chromium compatibility check passed")
+    print("AIHub Chromium Chrome-Android compatibility check passed")
     print(f"checkout: {root}")
-    print("direct Chromium Java seam: AiWebEngineHost.java")
-    print("expected target: //aihub/chromium-overlay:aihub_local")
+    print("browser base: //chrome/android:chrome_public_apk")
+    print("direct Chromium Java seam: AiHubChromeBridge.java")
 
 
 if __name__ == "__main__":
