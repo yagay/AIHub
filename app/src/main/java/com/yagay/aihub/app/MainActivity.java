@@ -1,5 +1,6 @@
 package com.yagay.aihub.app;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 
@@ -21,6 +22,7 @@ public final class MainActivity extends ComponentActivity {
         root.setFitsSystemWindows(true);
         setContentView(root);
         controller.start();
+        controller.handleIntent(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
@@ -31,6 +33,13 @@ public final class MainActivity extends ComponentActivity {
                 setEnabled(true);
             }
         });
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (controller != null) controller.handleIntent(intent);
     }
 
     @Override
