@@ -8,10 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.yagay.aihub"
-        minSdk = 31
+        minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.0-new"
     }
 
     buildTypes {
@@ -27,8 +27,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":aihub-core"))
-    implementation(project(":aihub-android"))
     implementation("androidx.activity:activity:1.13.0")
     implementation("androidx.webkit:webkit:1.17.0")
 }
