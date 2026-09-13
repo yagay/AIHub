@@ -98,7 +98,11 @@ public final class RootCdpBridge {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Thread reader = new Thread(() -> {
             try (InputStream input = process.getInputStream()) {
-                input.transferTo(out);
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    if (count > 0) out.write(buffer, 0, count);
+                }
             } catch (Exception ignored) {}
         }, "AIHub-su-reader");
         reader.start();
@@ -107,7 +111,7 @@ public final class RootCdpBridge {
             throw new BrowserStateException("root_timeout", "Root command timed out");
         }
         reader.join(1000);
-        String text = out.toString(StandardCharsets.UTF_8);
+        String text = new String(out.toByteArray(), StandardCharsets.UTF_8);
         if (process.exitValue() != 0) {
             throw new BrowserStateException(
                     "root_denied",
