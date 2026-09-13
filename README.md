@@ -56,7 +56,7 @@ scripts/             validation, Chromium sync/build/install and rule signing
 ```bash
 python3 scripts/validate_provider_rules.py
 python3 scripts/validate_repo.py
-./scripts/run_core_smoke_test.sh
+bash scripts/run_core_smoke_test.sh
 ```
 
 GitHub Actions runs the same stable-core checks on every push and pull request.
@@ -72,13 +72,13 @@ target_os = "android"
 Then use the one-command development flow:
 
 ```bash
-./scripts/build_install_aihub.sh /path/to/chromium/src out/Default
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default
 ```
 
 With multiple devices connected:
 
 ```bash
-./scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
+bash scripts/build_install_aihub.sh /path/to/chromium/src out/Default DEVICE_SERIAL
 ```
 
 The script performs repository validation, WebEngine API compatibility checks, syncs AIHub into the Chromium checkout, resolves the GN target, builds AIHub plus the local WebEngine support target, installs the produced APKs, and launches the guarded entry activity.
@@ -86,8 +86,8 @@ The script performs repository validation, WebEngine API compatibility checks, s
 Manual build-only and install-only commands are also available:
 
 ```bash
-./scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
-./scripts/install_aihub_local.sh /path/to/chromium/src out/Default
+bash scripts/build_aihub_chromium.sh /path/to/chromium/src out/Default
+bash scripts/install_aihub_local.sh /path/to/chromium/src out/Default
 ```
 
 ## Third-party calls
