@@ -8,12 +8,10 @@ import android.widget.FrameLayout;
 import androidx.activity.ComponentActivity;
 
 import com.yagay.aihub.model.AccountProfile;
-import com.yagay.aihub.model.ChatMessage;
 import com.yagay.aihub.provider.AiProviderAdapter;
 import com.yagay.aihub.web.GeckoEngine;
 import com.yagay.aihub.web.GeckoFilePicker;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.mozilla.geckoview.AllowOrDeny;
 import org.mozilla.geckoview.GeckoResult;
@@ -23,17 +21,15 @@ import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebExtension;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Owns retained Gecko sessions and the shared native conversation mirror. */
+/** Owns retained Gecko sessions. WEB and APP are two presentations of the same live page. */
 public final class WebSessionManager {
     public interface Events {
         void onMessage(String message);
         void onPageReady();
-        void onConversationChanged(List<ChatMessage> messages);
         void onAppModeChanged(boolean enabled);
     }
 
@@ -47,7 +43,6 @@ public final class WebSessionManager {
         String lastUrl;
         boolean canGoBack;
         boolean appCapable;
-        List<ChatMessage> lastMessages = List.of();
 
         Session(SessionKey key, AiProviderAdapter adapter, AccountProfile account, String contextId) {
             this.key = key;
@@ -82,8 +77,8 @@ public final class WebSessionManager {
     }
 
     public void switchTo(AiProviderAdapter adapter, AccountProfile account, String contextId) {
-        appModeRequested = false;
-        setActualAppMode(false);
+        leaveAppModeOnCurrent();
+
         SessionKey key = new SessionKey(adapter.spec().id(), account.id());
         Session session = sessions.get(key);
         if (session == null) {
@@ -94,27 +89,18 @@ public final class WebSessionManager {
         }
         currentKey = key;
         attachToView(session.geckoSession);
-        events.onConversationChanged(session.lastMessages);
     }
 
     public void send(String text) {
         Session session = current();
         if (session == null || text == null || text.isBlank()) return;
         if (!requireNativeReady(session)) return;
-
-        List<ChatMessage> optimistic = new ArrayList<>(session.lastMessages);
-        optimistic.add(new ChatMessage("user", text));
-        session.lastMessages = List.copyOf(optimistic);
-        events.onConversationChanged(session.lastMessages);
         post(session, session.adapter.sendCommand(text));
     }
 
     public void newChat() {
         Session session = current();
-        if (session == null || !requireNativeReady(session)) return;
-        session.lastMessages = List.of();
-        events.onConversationChanged(session.lastMessages);
-        post(session, session.adapter.newChatCommand());
+        if (session != null && requireNativeReady(session)) post(session, session.adapter.newChatCommand());
     }
 
     public void stopGeneration() {
@@ -141,8 +127,7 @@ public final class WebSessionManager {
 
     public void setAppModeEnabled(boolean enabled) {
         if (!enabled) {
-            appModeRequested = false;
-            setActualAppMode(false);
+            leaveAppModeOnCurrent();
             return;
         }
 
@@ -158,7 +143,7 @@ public final class WebSessionManager {
         appModeRequested = true;
         if (session.bridgePort == null) {
             setActualAppMode(false);
-            events.onMessage("The page is still loading. APP mode will remain off until the page bridge is ready.");
+            events.onMessage("The page bridge is not ready yet. Stay in WEB mode until loading finishes.");
             return;
         }
         requestProbe(session);
@@ -169,13 +154,12 @@ public final class WebSessionManager {
     }
 
     public void destroy() {
+        leaveAppModeOnCurrent();
         filePicker.destroy();
         if (geckoView.getSession() != null) geckoView.releaseSession();
         for (Session session : sessions.values()) destroySession(session);
         sessions.clear();
         currentKey = null;
-        appModeRequested = false;
-        appModeEnabled = false;
     }
 
     private void createSession(Session holder) {
@@ -215,8 +199,10 @@ public final class WebSessionManager {
                 holder.lastUrl = url;
                 holder.appCapable = false;
                 if (holder.key.equals(currentKey)) {
-                    if (!holder.adapter.spec().ownsUrl(url)) appModeRequested = false;
+                    // A navigation never creates a second APP state. The new live page is always
+                    // visible immediately; native controls are re-enabled only after a fresh probe.
                     setActualAppMode(false);
+                    if (!holder.adapter.spec().ownsUrl(url)) appModeRequested = false;
                 }
             }
 
@@ -310,9 +296,7 @@ public final class WebSessionManager {
                             port.disconnect();
                             return;
                         }
-                        if (port.sender.url != null && !port.sender.url.isBlank()) {
-                            holder.lastUrl = port.sender.url;
-                        }
+                        if (port.sender.url != null && !port.sender.url.isBlank()) holder.lastUrl = port.sender.url;
                         holder.bridgePort = port;
                         port.setDelegate(new WebExtension.PortDelegate() {
                             @Override
@@ -323,12 +307,14 @@ public final class WebSessionManager {
 
                             @Override
                             public void onDisconnect(WebExtension.Port source) {
-                                if (source == holder.bridgePort) holder.bridgePort = null;
+                                if (source == holder.bridgePort) {
+                                    holder.bridgePort = null;
+                                    holder.appCapable = false;
+                                    if (holder.key.equals(currentKey)) setActualAppMode(false);
+                                }
                             }
                         });
-                        if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) {
-                            requestProbe(holder);
-                        }
+                        if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) requestProbe(holder);
                     }
                 },
                 () -> {},
@@ -344,44 +330,37 @@ public final class WebSessionManager {
             if (holder.key.equals(currentKey) && appModeRequested && isTrusted(holder)) requestProbe(holder);
             return;
         }
-
-        if (type.equals("dirty")) {
-            if (holder.key.equals(currentKey) && appModeEnabled) requestSync(holder);
-            return;
-        }
-
         if (!type.equals("response")) return;
+
         String action = message.optString("action", "");
+        boolean ok = message.optBoolean("ok", false);
         if (action.equals("probe")) {
-            boolean capable = message.optBoolean("ok", false) && message.optBoolean("composer", false);
-            holder.appCapable = capable;
+            holder.appCapable = ok && message.optBoolean("composer", false);
             if (!holder.key.equals(currentKey) || !appModeRequested) return;
-            if (capable) {
+            if (holder.appCapable) {
+                // APP mode is not a second conversation. It only changes presentation and enables
+                // native controls around this exact page/session.
+                post(holder, holder.adapter.presentationCommand(true));
                 setActualAppMode(true);
-                requestSync(holder);
             } else {
                 appModeRequested = false;
                 setActualAppMode(false);
-                events.onMessage("APP mode is not available on this page. Stay in WEB mode for sign-in or unsupported pages.");
+                events.onMessage("This live page has no controllable composer yet. Stay in WEB mode.");
             }
             return;
         }
 
-        if (action.equals("sync")) {
-            JSONArray messages = message.optJSONArray("messages");
-            if (messages == null) return;
-            List<ChatMessage> parsed = parseMessages(messages);
-            if (!parsed.equals(holder.lastMessages)) {
-                holder.lastMessages = parsed;
-                if (holder.key.equals(currentKey) && appModeEnabled) events.onConversationChanged(parsed);
+        if (action.equals("presentation")) {
+            if (!ok && holder.key.equals(currentKey)) {
+                appModeRequested = false;
+                setActualAppMode(false);
+                events.onMessage("Could not apply APP presentation. The same live page remains available in WEB mode.");
             }
             return;
         }
 
-        if (!message.optBoolean("ok", false) && holder.key.equals(currentKey)) {
-            appModeRequested = false;
-            events.onMessage("The website control changed. Use WEB mode and update this provider's selectors.");
-            setActualAppMode(false);
+        if (!ok && holder.key.equals(currentKey)) {
+            events.onMessage("The website control changed. The live page is still intact; switch to WEB mode to continue.");
         }
     }
 
@@ -389,9 +368,13 @@ public final class WebSessionManager {
         post(session, session.adapter.probeCommand());
     }
 
-    private void requestSync(Session session) {
-        if (!appModeEnabled || session.bridgePort == null) return;
-        post(session, session.adapter.syncCommand());
+    private void leaveAppModeOnCurrent() {
+        Session session = current();
+        if (session != null && session.bridgePort != null && isTrusted(session)) {
+            post(session, session.adapter.presentationCommand(false));
+        }
+        appModeRequested = false;
+        setActualAppMode(false);
     }
 
     private void post(Session session, JSONObject command) {
@@ -400,13 +383,13 @@ public final class WebSessionManager {
             command.put("requestId", Long.toString(++requestSequence));
             session.bridgePort.postMessage(command);
         } catch (Exception error) {
-            events.onMessage("Could not send command to web page");
+            events.onMessage("Could not send command to live web page");
         }
     }
 
     private boolean requireNativeReady(Session session) {
         if (appModeEnabled && session.appCapable && session.bridgePort != null && isTrusted(session)) return true;
-        events.onMessage("APP mode is not ready. Switch to WEB mode and finish loading/sign-in first.");
+        events.onMessage("APP controls are not ready. The same conversation remains available in WEB mode.");
         return false;
     }
 
@@ -418,10 +401,6 @@ public final class WebSessionManager {
         if (appModeEnabled == enabled) return;
         appModeEnabled = enabled;
         events.onAppModeChanged(enabled);
-        if (enabled) {
-            Session session = current();
-            if (session != null) events.onConversationChanged(session.lastMessages);
-        }
     }
 
     private void attachToView(GeckoSession session) {
@@ -433,18 +412,6 @@ public final class WebSessionManager {
 
     private Session current() {
         return currentKey == null ? null : sessions.get(currentKey);
-    }
-
-    private static List<ChatMessage> parseMessages(JSONArray array) {
-        List<ChatMessage> out = new ArrayList<>();
-        for (int i = 0; i < array.length(); i++) {
-            JSONObject item = array.optJSONObject(i);
-            if (item == null) continue;
-            String role = item.optString("role", "assistant");
-            String text = item.optString("text", "").trim();
-            if (!text.isEmpty()) out.add(new ChatMessage(role, text));
-        }
-        return List.copyOf(out);
     }
 
     private void destroySession(Session holder) {
