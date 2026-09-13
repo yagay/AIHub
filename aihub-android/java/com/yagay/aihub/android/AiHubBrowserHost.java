@@ -18,10 +18,12 @@ public interface AiHubBrowserHost {
     ViewGroup overlayRoot();
     @Nullable View chromeControlContainer();
 
+    /** Opens the provider in a retained normal Chrome tab, or selects that tab if it still exists. */
     void openOrSelectProvider(String providerId, String homeUrl);
     void selectProvider(String providerId);
     void closeProvider(String providerId);
 
+    /** Executes AIHub DOM logic in an isolated world of the currently active Chrome tab. */
     void evaluateJavaScript(String script, @Nullable ValueCallback<String> callback);
 
     void back();
@@ -32,4 +34,7 @@ public interface AiHubBrowserHost {
     String currentUrl();
     boolean isLoading();
     int loadProgress();
+
+    /** Stable UI/runtime error surface; Chromium adapter decides how it is presented. */
+    void onAiHubError(String message);
 }
