@@ -283,9 +283,9 @@ public final class TitaniumManager {
     private static String runSu(String command, int timeoutSeconds) throws Exception {
         String inner = q(command);
         String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
-                + "nsenter -t 1 -m sh -c " + inner
+                + "nsenter -t 1 -m -- sh -c " + inner
                 + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
-                + "toybox nsenter -t 1 -m sh -c " + inner
+                + "toybox nsenter -t 1 -m -- sh -c " + inner
                 + "; else sh -c " + inner + "; fi";
 
         ProcessBuilder builder = new ProcessBuilder("su", "-c", namespaced);
