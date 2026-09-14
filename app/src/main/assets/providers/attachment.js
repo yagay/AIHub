@@ -4,6 +4,16 @@
   const cfg = window.__AIHUB_CONFIG__ || {};
   const state = window.__AIHUB_ATTACHMENT_STATE__ || (window.__AIHUB_ATTACHMENT_STATE__ = {});
 
+  const simpleHash = (value) => {
+    let hash = 2166136261;
+    const source = String(value || "");
+    for (let i = 0; i < source.length; i++) {
+      hash ^= source.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
+  };
+
   const visible = (node) => {
     if (!node) return false;
     const rect = node.getBoundingClientRect();
@@ -29,24 +39,12 @@
   const bestFileInput = () => fileInputs().sort((a, b) => scoreFileInput(b) - scoreFileInput(a))[0] || null;
 
   const genericAttachmentButtonSelectors = [
-    "[data-testid='composer-plus-btn']",
-    "[data-testid*='attach' i]",
-    "[data-testid*='upload' i]",
-    "button[aria-label*='attach' i]",
-    "button[aria-label*='upload' i]",
-    "button[aria-label*='add file' i]",
-    "button[aria-label*='add photo' i]",
-    "button[aria-label*='photo' i]",
-    "button[title*='attach' i]",
-    "button[title*='upload' i]",
-    "[role='button'][aria-label*='attach' i]",
-    "[role='button'][aria-label*='upload' i]"
+    "[data-testid='composer-plus-btn']", "[data-testid*='attach' i]", "[data-testid*='upload' i]",
+    "button[aria-label*='attach' i]", "button[aria-label*='upload' i]", "button[aria-label*='add file' i]",
+    "button[aria-label*='add photo' i]", "button[aria-label*='photo' i]", "button[title*='attach' i]",
+    "button[title*='upload' i]", "[role='button'][aria-label*='attach' i]", "[role='button'][aria-label*='upload' i]"
   ];
-
-  const attachmentButtonSelectors = [
-    ...(cfg.attachmentButtonSelectors || []),
-    ...genericAttachmentButtonSelectors
-  ];
+  const attachmentButtonSelectors = [...(cfg.attachmentButtonSelectors || []), ...genericAttachmentButtonSelectors];
 
   const findAttachmentButton = () => {
     for (const selector of attachmentButtonSelectors) {
@@ -69,7 +67,6 @@
         }
       } catch (_) {}
     }
-
     const candidates = Array.from(document.querySelectorAll("button, [role='menuitem'], [role='option'], [role='button'], .mat-mdc-menu-item"));
     const rx = /(upload files?|attach files?|add files?|photos?\s*&\s*files?|上传文件|上传|附件|添加文件)/i;
     return candidates.find((node) => visible(node) && rx.test((node.innerText || node.textContent || node.getAttribute?.("aria-label") || "").trim())) || null;
@@ -113,61 +110,46 @@
       try { data = new ClipboardEvent("").clipboardData; } catch (_) {}
     }
     if (!data?.items) return 0;
-
     const max = input.multiple ? files.length : Math.min(files.length, 1);
     for (let i = 0; i < max; i++) {
       try { data.items.add(files[i]); } catch (_) {}
     }
     if (!data.files || data.files.length === 0) return 0;
-
     try {
       const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
-      if (descriptor?.set) descriptor.set.call(input, data.files);
-      else input.files = data.files;
+      if (descriptor?.set) descriptor.set.call(input, data.files); else input.files = data.files;
       dispatchFileEvents(input);
       state.lastStrategy = "native-filelist";
       return data.files.length;
-    } catch (_) {
-      return 0;
-    }
+    } catch (_) { return 0; }
   };
 
   const assignWithInstanceOverride = (input, files) => {
     const max = input.multiple ? files.length : Math.min(files.length, 1);
     const selected = files.slice(0, max);
     if (!selected.length) return 0;
-
     const fileListLike = selected.slice();
     fileListLike.item = (index) => fileListLike[index] || null;
     try {
-      Object.defineProperty(input, "files", {
-        configurable: true,
-        enumerable: true,
-        get: () => fileListLike
-      });
+      Object.defineProperty(input, "files", { configurable: true, enumerable: true, get: () => fileListLike });
       dispatchFileEvents(input);
       state.lastStrategy = "instance-files-override";
       return selected.length;
-    } catch (_) {
-      return 0;
-    }
+    } catch (_) { return 0; }
   };
 
   api.prepareAttachmentInput = () => {
     if (bestFileInput()) return "ready";
-
     const menuItem = findUploadMenuItem();
     if (menuItem) {
       menuItem.click();
       state.lastPrepare = "clicked-upload-item";
       return "clicked-upload-item";
     }
-
     const button = findAttachmentButton();
     if (!button) return "not-found";
     button.click();
     state.lastPrepare = "opened-menu";
-
     [100, 240, 480].forEach((delay) => {
       setTimeout(() => {
         if (bestFileInput()) return;
@@ -183,13 +165,10 @@
   api.attachStagedFiles = () => {
     const bridge = window.AIHubNativeFiles;
     if (!bridge || typeof bridge.count !== "function") return "no-bridge";
-
     const input = bestFileInput();
     if (!input) return "no-input";
-
     const files = stagedFiles();
     if (!files.length) return "no-files";
-
     let attached = assignWithDataTransfer(input, files);
     if (attached <= 0) attached = assignWithInstanceOverride(input, files);
     if (attached > 0) {
@@ -203,10 +182,7 @@
 
   api.openAttachmentPicker = () => {
     const input = bestFileInput();
-    if (input) {
-      input.click();
-      return "opened-input";
-    }
+    if (input) { input.click(); return "opened-input"; }
     const button = findAttachmentButton();
     if (!button) return "not-found";
     button.click();
@@ -232,7 +208,7 @@
       lastInputMultiple: !!state.lastInputMultiple,
       lastStrategy: state.lastStrategy || "",
       lastPrepare: state.lastPrepare || "",
-      path: location.pathname
+      pathHash: simpleHash(location.pathname)
     };
   };
 })();
