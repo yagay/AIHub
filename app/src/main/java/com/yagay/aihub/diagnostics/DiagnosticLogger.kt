@@ -1,5 +1,6 @@
 package com.yagay.aihub.diagnostics
 
+import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -7,19 +8,24 @@ import android.os.Process
 import android.util.Log
 import android.webkit.WebView
 import com.yagay.aihub.BuildConfig
+import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 object DiagnosticLogger {
     private const val TAG_PREFIX = "AIHub"
     private const val MAX_LOG_BYTES = 2L * 1024L * 1024L
-    private const val MAX_LOGCAT_LINES = 4000
+    private const val MAX_SESSION_LOG_BYTES = 4L * 1024L * 1024L
+    private const val MAX_SNAPSHOT_BYTES = 8L * 1024L * 1024L
+    private const val MAX_LOGCAT_LINES = 6000
     private val lock = Any()
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US).apply {
         timeZone = TimeZone.getDefault()
@@ -30,22 +36,59 @@ object DiagnosticLogger {
 
     @Volatile
     private var appContext: Context? = null
+    private var sessionId: String = ""
 
     fun init(context: Context) {
         if (appContext != null) return
         synchronized(lock) {
             if (appContext == null) {
                 appContext = context.applicationContext
-                ensureDir()
+                val dir = ensureDir()
+                sessionId = UUID.randomUUID().toString().take(12)
+                File(dir, "current-session.log").delete()
+                File(dir, "web-snapshots.jsonl").delete()
             }
         }
-        i("APP", "diagnostic_logger_initialized version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) sdk=${Build.VERSION.SDK_INT}")
+        i(
+            "APP",
+            "diagnostic_logger_initialized version=${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) sdk=${Build.VERSION.SDK_INT} session=$sessionId"
+        )
     }
 
     fun d(tag: String, message: String) = write("D", tag, message, null)
     fun i(tag: String, message: String) = write("I", tag, message, null)
     fun w(tag: String, message: String, throwable: Throwable? = null) = write("W", tag, message, throwable)
     fun e(tag: String, message: String, throwable: Throwable? = null) = write("E", tag, message, throwable)
+
+    fun recordSnapshot(scope: String, phase: String, payload: String) {
+        val ctx = appContext ?: return
+        val safeScope = scope.replace(Regex("[^A-Za-z0-9_.:-]"), "_").take(100)
+        val safePhase = phase.replace(Regex("[^A-Za-z0-9_.:-]"), "_").take(100)
+        val safePayload = scrub(payload.replace('\u0000', ' '), 60_000)
+        val parsedPayload = runCatching { JSONTokener(safePayload).nextValue() }.getOrNull()
+        val obj = JSONObject()
+            .put("timestamp", synchronized(lock) { timestampFormat.format(Date()) })
+            .put("session", sessionId)
+            .put("scope", safeScope)
+            .put("phase", safePhase)
+        if (parsedPayload != null) obj.put("payload", parsedPayload) else obj.put("payloadText", safePayload)
+
+        runCatching {
+            synchronized(lock) {
+                val file = File(ctx.filesDir, "diagnostics/web-snapshots.jsonl")
+                if (file.exists() && file.length() >= MAX_SNAPSHOT_BYTES) {
+                    File(file.parentFile, "web-snapshots.jsonl.1").delete()
+                    file.renameTo(File(file.parentFile, "web-snapshots.jsonl.1"))
+                }
+                FileOutputStream(file, true).bufferedWriter(Charsets.UTF_8).use { writer ->
+                    writer.write(obj.toString())
+                    writer.newLine()
+                }
+            }
+        }.onFailure {
+            w("DIAG", "snapshot_write_failed scope=$safeScope phase=$safePhase type=${it.javaClass.simpleName}")
+        }
+    }
 
     fun suggestedFileName(): String = synchronized(lock) {
         "AIHub-diagnostic-${fileNameFormat.format(Date())}.zip"
@@ -54,8 +97,11 @@ object DiagnosticLogger {
     fun clear() {
         val ctx = appContext ?: return
         synchronized(lock) {
-            File(ctx.filesDir, "diagnostics/aihub.log").delete()
-            File(ctx.filesDir, "diagnostics/aihub.log.1").delete()
+            val dir = File(ctx.filesDir, "diagnostics")
+            listOf(
+                "aihub.log", "aihub.log.1", "current-session.log",
+                "web-snapshots.jsonl", "web-snapshots.jsonl.1"
+            ).forEach { File(dir, it).delete() }
         }
         i("APP", "diagnostic_log_cleared")
     }
@@ -71,7 +117,13 @@ object DiagnosticLogger {
             ZipOutputStream(stream.buffered()).use { zip ->
                 putText(zip, "diagnostic-info.txt", buildDiagnosticInfo(context))
                 val dir = File(context.filesDir, "diagnostics")
-                listOf("aihub.log.1", "aihub.log").forEach { name ->
+                listOf(
+                    "current-session.log",
+                    "web-snapshots.jsonl.1",
+                    "web-snapshots.jsonl",
+                    "aihub.log.1",
+                    "aihub.log"
+                ).forEach { name ->
                     val file = File(dir, name)
                     if (file.isFile) putFile(zip, file, name)
                 }
@@ -80,8 +132,11 @@ object DiagnosticLogger {
                     zip,
                     "README.txt",
                     "AIHub diagnostic bundle.\n" +
-                        "It intentionally does not export conversations, cookies, passwords, or authentication tokens.\n" +
-                        "URLs are stripped of query strings/fragments where AIHub records them.\n"
+                        "current-session.log contains only the current app process session.\n" +
+                        "web-snapshots.jsonl contains privacy-safe structural WebView snapshots; message text is not exported.\n" +
+                        "aihub.log may include older app sessions for historical comparison.\n" +
+                        "Conversations, cookies, passwords, authentication tokens and file contents are intentionally excluded.\n" +
+                        "Recorded URLs are stripped of query strings/fragments where AIHub records them.\n"
                 )
             }
         }
@@ -125,11 +180,13 @@ object DiagnosticLogger {
 
         runCatching {
             synchronized(lock) {
-                val file = File(ctx.filesDir, "diagnostics/aihub.log")
-                rotateIfNeeded(file)
-                FileOutputStream(file, true).bufferedWriter(Charsets.UTF_8).use { writer ->
-                    writer.write(line)
-                }
+                val dir = File(ctx.filesDir, "diagnostics").apply { mkdirs() }
+                val history = File(dir, "aihub.log")
+                rotateIfNeeded(history, MAX_LOG_BYTES, "aihub.log.1")
+                appendText(history, line)
+
+                val session = File(dir, "current-session.log")
+                if (session.length() < MAX_SESSION_LOG_BYTES) appendText(session, line)
             }
         }
 
@@ -146,10 +203,14 @@ object DiagnosticLogger {
         return File(ctx.filesDir, "diagnostics").apply { mkdirs() }
     }
 
-    private fun rotateIfNeeded(file: File) {
+    private fun appendText(file: File, text: String) {
+        FileOutputStream(file, true).bufferedWriter(Charsets.UTF_8).use { writer -> writer.write(text) }
+    }
+
+    private fun rotateIfNeeded(file: File, limit: Long, previousName: String) {
         file.parentFile?.mkdirs()
-        if (file.exists() && file.length() >= MAX_LOG_BYTES) {
-            val previous = File(file.parentFile, "${file.name}.1")
+        if (file.exists() && file.length() >= limit) {
+            val previous = File(file.parentFile, previousName)
             previous.delete()
             file.renameTo(previous)
         }
@@ -158,6 +219,7 @@ object DiagnosticLogger {
     private fun buildDiagnosticInfo(context: Context): String = buildString {
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         val webViewPackage = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val versionCode = if (packageInfo == null) {
             BuildConfig.VERSION_CODE.toLong()
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -166,7 +228,9 @@ object DiagnosticLogger {
             @Suppress("DEPRECATION")
             packageInfo.versionCode.toLong()
         }
+        val runtime = Runtime.getRuntime()
         appendLine("generated=${synchronized(lock) { timestampFormat.format(Date()) }}")
+        appendLine("session=$sessionId")
         appendLine("package=${context.packageName}")
         appendLine("versionName=${packageInfo?.versionName ?: BuildConfig.VERSION_NAME}")
         appendLine("versionCode=$versionCode")
@@ -178,8 +242,17 @@ object DiagnosticLogger {
         appendLine("sdk=${Build.VERSION.SDK_INT}")
         appendLine("android=${Build.VERSION.RELEASE}")
         appendLine("fingerprint=${Build.FINGERPRINT}")
+        appendLine("abis=${Build.SUPPORTED_ABIS.joinToString(",")}")
+        appendLine("locales=${context.resources.configuration.locales.toLanguageTags()}")
+        appendLine("timezone=${TimeZone.getDefault().id}")
         appendLine("webViewPackage=${webViewPackage?.packageName ?: "unknown"}")
         appendLine("webViewVersion=${webViewPackage?.versionName ?: "unknown"}")
+        appendLine("memoryClassMb=${activityManager?.memoryClass ?: -1}")
+        appendLine("largeMemoryClassMb=${activityManager?.largeMemoryClass ?: -1}")
+        appendLine("lowRamDevice=${activityManager?.isLowRamDevice ?: false}")
+        appendLine("runtimeMaxMemory=${runtime.maxMemory()}")
+        appendLine("runtimeTotalMemory=${runtime.totalMemory()}")
+        appendLine("runtimeFreeMemory=${runtime.freeMemory()}")
         appendLine("pid=${Process.myPid()}")
     }
 
