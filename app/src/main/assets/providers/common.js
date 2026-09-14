@@ -2,9 +2,17 @@
   const cfg = window.__AIHUB_CONFIG__ || {};
 
   const all = (selectors) => {
+    const seen = new Set();
     const out = [];
     (selectors || []).forEach((selector) => {
-      try { document.querySelectorAll(selector).forEach((node) => out.push(node)); } catch (_) {}
+      try {
+        document.querySelectorAll(selector).forEach((node) => {
+          if (!seen.has(node)) {
+            seen.add(node);
+            out.push(node);
+          }
+        });
+      } catch (_) {}
     });
     return out;
   };
@@ -84,13 +92,60 @@
       id: node.id || "",
       role: node.getAttribute?.("role") || "",
       testid: node.getAttribute?.("data-testid") || "",
-      disabled: !!node.disabled || node.getAttribute?.("aria-disabled") === "true",
+      author: node.getAttribute?.("data-message-author-role") || node.getAttribute?.("data-turn") || "",
       width: Math.round(rect.width),
       height: Math.round(rect.height)
     };
   };
 
   const responseNodes = () => all(cfg.responseSelectors);
+
+  const textFromTurn = (turn) => {
+    if (!turn) return "";
+    const contentSelectors = cfg.responseContentSelectors || [];
+    for (const selector of contentSelectors) {
+      try {
+        const nodes = turn.querySelectorAll(selector);
+        for (let i = nodes.length - 1; i >= 0; i--) {
+          const value = textOf(nodes[i]);
+          if (value) return value;
+        }
+      } catch (_) {}
+    }
+
+    const clone = turn.cloneNode(true);
+    try {
+      clone.querySelectorAll("button, nav, [role='toolbar'], [data-testid*='action'], [class*='action']").forEach((node) => node.remove());
+    } catch (_) {}
+    return textOf(clone);
+  };
+
+  const responseViaCopyButton = () => {
+    const buttons = all(cfg.copyButtonSelectors);
+    for (let i = buttons.length - 1; i >= 0; i--) {
+      const button = buttons[i];
+      let turn = null;
+      for (const selector of (cfg.turnSelectors || [])) {
+        try {
+          turn = button.closest(selector);
+          if (turn) break;
+        } catch (_) {}
+      }
+      if (!turn) turn = button.closest("article, section, [data-testid*='conversation-turn']");
+      const value = textFromTurn(turn);
+      if (value) return value;
+    }
+    return "";
+  };
+
+  const extractResponse = () => {
+    const nodes = responseNodes();
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const text = textOf(nodes[i]);
+      if (text) return text;
+    }
+    return responseViaCopyButton();
+  };
 
   window.__AIHUB__ = {
     isLoggedIn() {
@@ -108,9 +163,6 @@
         return "ok";
       }
 
-      // Some React/Angular pages render or enable the send button only after
-      // their state sees the input event. Only one delayed submission is ever
-      // allowed, otherwise repeated timers could duplicate a message.
       let submitted = false;
       const delays = [120, 280, 520, 900];
       delays.forEach((delay, index) => {
@@ -130,12 +182,7 @@
     },
 
     extractLastResponse() {
-      const nodes = responseNodes();
-      for (let i = nodes.length - 1; i >= 0; i--) {
-        const text = textOf(nodes[i]);
-        if (text) return text;
-      }
-      return "";
+      return extractResponse();
     },
 
     isGenerating() { return !!firstVisible(cfg.stopSelectors); },
@@ -156,11 +203,10 @@
 
     probeSummary() {
       const responses = responseNodes();
-      let lastResponseChars = 0;
-      for (let i = responses.length - 1; i >= 0; i--) {
-        const text = textOf(responses[i]);
-        if (text) { lastResponseChars = text.length; break; }
-      }
+      const extracted = extractResponse();
+      const turns = all(cfg.turnSelectors);
+      const assistants = all(cfg.assistantMarkerSelectors);
+      const copyButtons = all(cfg.copyButtonSelectors);
       return {
         viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
         inputCount: all(cfg.inputSelectors).length,
@@ -169,7 +215,11 @@
         sendCount: all(cfg.sendSelectors).length,
         visibleSend: nodeSummary(firstVisible(cfg.sendSelectors)),
         responseCount: responses.length,
-        lastResponseChars,
+        extractedChars: extracted.length,
+        turnCount: turns.length,
+        assistantMarkerCount: assistants.length,
+        copyButtonCount: copyButtons.length,
+        lastTurn: nodeSummary(turns.length ? turns[turns.length - 1] : null),
         stopCount: all(cfg.stopSelectors).length,
         path: location.pathname,
         bodyChars: (document.body?.innerText || "").length
