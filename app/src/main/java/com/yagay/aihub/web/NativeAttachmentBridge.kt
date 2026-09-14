@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.webkit.JavascriptInterface
+import com.yagay.aihub.diagnostics.DiagnosticLogger
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -80,6 +81,19 @@ class NativeAttachmentBridge(private val context: Context) {
             raf.readFully(bytes)
         }
         Base64.encodeToString(bytes, Base64.NO_WRAP)
+    }
+
+    @JavascriptInterface
+    fun diagnosticSnapshot(scope: String, phase: String, payload: String) {
+        DiagnosticLogger.recordSnapshot(scope, phase, payload)
+    }
+
+    @JavascriptInterface
+    fun diagnosticEvent(scope: String, event: String, detail: String) {
+        DiagnosticLogger.d(
+            "WEBTRACE",
+            "scope=${DiagnosticLogger.scrub(scope, 120)} event=${DiagnosticLogger.scrub(event, 120)} detail=${DiagnosticLogger.scrub(detail, 1000)}"
+        )
     }
 
     private fun queryMeta(uri: Uri): Pair<String, Long?> {
