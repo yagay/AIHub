@@ -44,6 +44,12 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
       __aihubProgress(id, 'content_received');
 
       try {
+        // Prometheus' send_only helper includes a 30s duplicate-send guard for
+        // its own retry machinery. AIHub command ids already provide deduplication,
+        // so clear that guard before every genuine user command.
+        handleSendOnly._lastSendTime = 0;
+        handleSendOnly._lastPrevCount = 0;
+
         // Prometheus v2.3: type + send and return immediately with response baseline.
         const sent = await handleSendOnly(prompt);
         if (!sent || sent.error) {
@@ -58,6 +64,7 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
         let lastPhase = '';
         let lastTextLength = -1;
         let stableSince = 0;
+        let stableTextLength = -1;
 
         while (Date.now() < deadline) {
           const status = checkResponseStatus(prevCount) || {};
@@ -75,7 +82,14 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
           }
 
           if (phase === 'stable') {
-            if (!stableSince) stableSince = Date.now();
+            // Some providers change DOM structures faster than their "generating"
+            // selector can track. Require the measured response length itself to stay
+            // unchanged for 2.5s before extracting, otherwise a partial answer could
+            // be returned as final.
+            if (!stableSince || textLength !== stableTextLength) {
+              stableSince = Date.now();
+              stableTextLength = textLength;
+            }
             if (Date.now() - stableSince >= 2500) {
               const adapter = detectAdapter() || __aihubAdapter;
               const response = extractLastResponse(adapter, prevCount, { userQuestion: prompt });
@@ -90,9 +104,11 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
               }
               __aihubProgress(id, 'extract_empty', status);
               stableSince = 0;
+              stableTextLength = -1;
             }
           } else {
             stableSince = 0;
+            stableTextLength = -1;
           }
 
           // Prometheus sleep() uses MessageChannel for short waits, avoiding
