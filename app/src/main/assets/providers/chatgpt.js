@@ -73,10 +73,60 @@ window.__AIHUB_CONFIG__ = {
     "[data-message-author-role='assistant']",
     "[data-turn='assistant']"
   ],
+  modelSelectors: [
+    "button[data-testid='model-switcher-dropdown-button']",
+    "button[aria-haspopup='menu'][data-tone='neutral']",
+    "button.__composer-pill"
+  ],
+  searchSelectors: [
+    "button[data-testid*='search' i]",
+    "button[aria-label*='search' i]"
+  ],
+  reasoningSelectors: [
+    "button[data-testid*='intelligence' i]",
+    "button[data-testid*='reasoning' i]",
+    "button[aria-label*='reasoning' i]",
+    "button[aria-label*='thinking' i]"
+  ],
+  toolsSelectors: [
+    "button[data-testid*='tools' i]",
+    "button[aria-label*='tools' i]"
+  ],
+  retrySelectors: [
+    "button[data-testid*='regenerate' i]",
+    "button[data-testid*='retry' i]",
+    "button[aria-label*='regenerate' i]",
+    "button[aria-label*='retry' i]"
+  ],
+  continueSelectors: [
+    "button[data-testid*='continue' i]",
+    "button[aria-label*='continue' i]"
+  ],
   copyButtonSelectors: [
     "button[data-testid='copy-turn-action-button']",
     "button[aria-label='Copy']",
     "button[aria-label*='Copy' i]"
+  ],
+  editSelectors: [
+    "button[data-testid*='edit' i]",
+    "button[aria-label*='edit' i]"
+  ],
+  conversationMenuSelectors: [
+    "button[data-testid*='conversation' i][aria-haspopup='menu']",
+    "button[aria-label*='chat options' i]",
+    "button[aria-label*='conversation options' i]"
+  ],
+  historySelectors: [
+    "#history a[href^='/c/']",
+    "#history a[href^='/uc/']",
+    "nav a[href^='/c/']",
+    "nav a[href^='/uc/']"
+  ],
+  voiceSelectors: [
+    "button[data-testid*='voice' i]",
+    "button[data-testid*='speech' i]",
+    "button[aria-label*='voice' i]",
+    "button[aria-label*='microphone' i]"
   ],
   stopSelectors: [
     "button[data-testid='stop-button']",
