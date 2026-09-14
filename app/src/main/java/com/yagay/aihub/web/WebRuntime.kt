@@ -1,5 +1,6 @@
 package com.yagay.aihub.web
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -7,6 +8,7 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -29,6 +31,9 @@ import kotlin.coroutines.suspendCoroutine
 class WebRuntime(private val context: Context) {
     private val loader = ScriptLoader(context)
     private val webViews = linkedMapOf<String, WebView>()
+    private var fileChooserLauncher: ((Intent) -> Unit)? = null
+    private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingFileProvider: String? = null
 
     init {
         DiagnosticLogger.i("WEB", "runtime_created multiProfile=$supportsMultiProfile")
@@ -36,6 +41,34 @@ class WebRuntime(private val context: Context) {
 
     val supportsMultiProfile: Boolean
         get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+
+    fun setFileChooserLauncher(launcher: ((Intent) -> Unit)?) {
+        fileChooserLauncher = launcher
+        DiagnosticLogger.d("FILE", "file_chooser_launcher_set available=${launcher != null}")
+    }
+
+    fun handleFileChooserResult(resultCode: Int, data: Intent?) {
+        val callback = pendingFileCallback ?: return
+        val provider = pendingFileProvider.orEmpty()
+        val uris = if (resultCode == Activity.RESULT_OK) {
+            when {
+                data?.clipData != null -> {
+                    val clip = data.clipData!!
+                    Array(clip.itemCount) { index -> clip.getItemAt(index).uri }
+                }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            }
+        } else null
+
+        DiagnosticLogger.i(
+            "FILE",
+            "file_chooser_result provider=$provider resultCode=$resultCode selected=${uris?.size ?: 0}"
+        )
+        callback.onReceiveValue(uris)
+        pendingFileCallback = null
+        pendingFileProvider = null
+    }
 
     fun attach(host: FrameLayout, session: SessionKey, provider: ProviderSpec) {
         val webView = obtain(session, provider)
@@ -53,6 +86,20 @@ class WebRuntime(private val context: Context) {
         val result = call(session, provider, "isLoggedIn") == "true"
         DiagnosticLogger.d("WEB", "login_check provider=${provider.id} result=$result")
         return result
+    }
+
+    suspend fun openAttachmentPicker(session: SessionKey, provider: ProviderSpec): Boolean {
+        ensureLoaded(session, provider)
+        val result = call(session, provider, "openAttachmentPicker")
+        DiagnosticLogger.i("FILE", "attachment_picker_requested provider=${provider.id} result=${result ?: "null"}")
+        if (result == "opened-input" || result == "opened-button") return true
+
+        val probe = call(session, provider, "attachmentProbe").orEmpty()
+        DiagnosticLogger.w(
+            "FILE",
+            "attachment_picker_unavailable provider=${provider.id} probe=${DiagnosticLogger.scrub(probe).take(1200)}"
+        )
+        return false
     }
 
     suspend fun send(session: SessionKey, provider: ProviderSpec, prompt: String): Boolean {
@@ -106,6 +153,9 @@ class WebRuntime(private val context: Context) {
 
     fun destroy() {
         DiagnosticLogger.i("WEB", "runtime_destroy webViews=${webViews.size}")
+        pendingFileCallback?.onReceiveValue(null)
+        pendingFileCallback = null
+        pendingFileProvider = null
         webViews.values.forEach { webView ->
             (webView.parent as? ViewGroup)?.removeView(webView)
             webView.stopLoading()
@@ -138,6 +188,52 @@ class WebRuntime(private val context: Context) {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                 webChromeClient = object : WebChromeClient() {
+                    override fun onShowFileChooser(
+                        webView: WebView,
+                        filePathCallback: ValueCallback<Array<Uri>>,
+                        fileChooserParams: FileChooserParams
+                    ): Boolean {
+                        val launcher = fileChooserLauncher
+                        if (launcher == null) {
+                            DiagnosticLogger.w("FILE", "file_chooser_no_launcher provider=${provider.id}")
+                            filePathCallback.onReceiveValue(null)
+                            return false
+                        }
+
+                        pendingFileCallback?.onReceiveValue(null)
+                        pendingFileCallback = filePathCallback
+                        pendingFileProvider = provider.id
+
+                        val intent = runCatching { fileChooserParams.createIntent() }.getOrElse {
+                            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = fileChooserParams.acceptTypes
+                                    .firstOrNull { it.isNotBlank() }
+                                    ?.takeIf { !it.startsWith(".") }
+                                    ?: "*/*"
+                            }
+                        }.apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            if (fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                        }
+
+                        DiagnosticLogger.i(
+                            "FILE",
+                            "file_chooser_open provider=${provider.id} mode=${fileChooserParams.mode} accepts=${fileChooserParams.acceptTypes.filter { it.isNotBlank() }.joinToString("|").take(240)}"
+                        )
+                        return runCatching {
+                            launcher(intent)
+                            true
+                        }.onFailure {
+                            pendingFileCallback?.onReceiveValue(null)
+                            pendingFileCallback = null
+                            pendingFileProvider = null
+                            DiagnosticLogger.e("FILE", "file_chooser_launch_failed provider=${provider.id}", it)
+                        }.getOrDefault(false)
+                    }
+
                     override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
                         if (consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR ||
                             consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.WARNING
