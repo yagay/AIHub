@@ -3,6 +3,7 @@ package com.yagay.aihub.ui
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -15,10 +16,11 @@ import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.AccountProfile
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
-import com.yagay.aihub.model.SessionKey
 import com.yagay.aihub.model.ProviderSpec
+import com.yagay.aihub.model.SessionKey
 import com.yagay.aihub.provider.ProviderCatalog
 import com.yagay.aihub.web.WebRuntime
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -36,10 +38,13 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     val messages = mutableStateListOf<ChatMessage>()
     var showWeb by mutableStateOf(false)
         private set
-    var isGenerating by mutableStateOf(false)
-        private set
-    var status by mutableStateOf<String?>(null)
-        private set
+
+    // Generation state is session-scoped. This lets ChatGPT keep polling in the
+    // background while the user switches to Gemini/Claude/etc. and starts more work.
+    private val generatingSessions = mutableStateMapOf<String, Boolean>()
+    private val sessionStatuses = mutableStateMapOf<String, String?>()
+    private val unreadSessions = mutableStateMapOf<String, Boolean>()
+    private val generationJobs = mutableMapOf<String, Job>()
 
     init {
         DiagnosticLogger.i("VM", "viewmodel_created providers=${providers.size} accounts=${accounts.size}")
@@ -49,41 +54,50 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     val selectedProvider get() = ProviderCatalog.byId(selectedProviderId)
     val selectedAccount: AccountProfile get() = accounts.firstOrNull { it.id == selectedAccountId } ?: defaultAccount(selectedProviderId)
     val session: SessionKey get() = SessionKey(selectedProviderId, selectedAccount.id)
+    val isGenerating: Boolean get() = isSessionGenerating(session)
+    val status: String? get() = sessionStatuses[session.storageKey]
 
     fun accountsFor(providerId: String) = accounts.filter { it.providerId == providerId }
 
+    fun isSessionGenerating(providerId: String, accountId: String): Boolean =
+        generatingSessions[SessionKey(providerId, accountId).storageKey] == true
+
+    fun hasUnreadResponse(providerId: String, accountId: String): Boolean =
+        unreadSessions[SessionKey(providerId, accountId).storageKey] == true
+
     fun selectAccount(accountId: String) {
-        if (isGenerating) {
-            DiagnosticLogger.w("VM", "account_switch_ignored generating=true")
-            return
-        }
         val account = accounts.firstOrNull { it.id == accountId } ?: return
+        val previous = session
         selectedProviderId = account.providerId
         selectedAccountId = account.id
-        DiagnosticLogger.i("VM", "account_selected provider=${account.providerId} account=${safeAccountId(account.id)}")
-        status = null
+        unreadSessions[session.storageKey] = false
+        DiagnosticLogger.i(
+            "VM",
+            "account_selected provider=${account.providerId} account=${safeAccountId(account.id)} previous=${previous.storageKey} backgroundJobs=${generationJobs.size}"
+        )
         reloadConversation()
     }
 
     fun addAccount(label: String, runtime: WebRuntime) {
         if (!runtime.supportsMultiProfile) {
             DiagnosticLogger.w("VM", "add_account_rejected provider=$selectedProviderId reason=multi_profile_unsupported")
-            status = "当前 Android System WebView 不支持 Multi-Profile，暂时只能使用每个 AI 的默认账号。"
+            setStatus(session, "当前 Android System WebView 不支持 Multi-Profile，暂时只能使用每个 AI 的默认账号。")
             return
         }
         val account = accountStore.add(selectedProviderId, label)
         accounts = accountStore.loadAll()
         selectedAccountId = account.id
         messages.clear()
+        unreadSessions[session.storageKey] = false
         showWeb = true
         DiagnosticLogger.i("VM", "account_added provider=$selectedProviderId account=${safeAccountId(account.id)}")
-        status = "请登录 ${selectedProvider.name} 的新账号"
+        setStatus(session, "请登录 ${selectedProvider.name} 的新账号")
     }
 
     fun openWeb() {
         DiagnosticLogger.i("VM", "web_opened provider=$selectedProviderId account=${safeAccountId(selectedAccount.id)}")
         showWeb = true
-        status = null
+        setStatus(session, null)
     }
 
     fun closeWeb() {
@@ -93,9 +107,10 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
     fun send(prompt: String, runtime: WebRuntime, attachmentCount: Int = 0) {
         val text = prompt.trim()
-        if ((text.isBlank() && attachmentCount <= 0) || isGenerating) return
         val currentSession = session
         val provider = selectedProvider
+        if ((text.isBlank() && attachmentCount <= 0) || isSessionGenerating(currentSession)) return
+
         DiagnosticLogger.i(
             "CHAT",
             "send_started provider=${provider.id} account=${safeAccountId(currentSession.accountId)} promptChars=${text.length} attachments=$attachmentCount"
@@ -106,11 +121,12 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             else -> text
         }
         messages += ChatMessage(role = MessageRole.USER, text = visibleUserText)
-        persist(currentSession)
+        conversationStore.save(currentSession, messages.toList())
+        unreadSessions[currentSession.storageKey] = false
 
-        viewModelScope.launch {
-            isGenerating = true
-            status = "正在连接 ${provider.name}…"
+        launchGeneration(currentSession) {
+            setGenerating(currentSession, true)
+            setStatus(currentSession, "正在连接 ${provider.name}…")
 
             val loggedInHint = runCatching { runtime.isLoggedIn(currentSession, provider) }
                 .onFailure { DiagnosticLogger.e("CHAT", "login_check_exception provider=${provider.id}", it) }
@@ -125,18 +141,21 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 .getOrDefault(false)
             if (!sent) {
                 DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint attachments=$attachmentCount")
-                isGenerating = false
-                showWeb = true
-                status = if (!loggedInHint) {
-                    "没有找到 ${provider.name} 的聊天输入框。请在网页中确认已登录，然后返回重试。"
-                } else {
-                    "网页结构可能已经变化，未找到输入框或发送按钮。"
-                }
-                return@launch
+                setGenerating(currentSession, false)
+                if (isCurrentSession(currentSession)) showWeb = true
+                setStatus(
+                    currentSession,
+                    if (!loggedInHint) {
+                        "没有找到 ${provider.name} 的聊天输入框。请在网页中确认已登录，然后返回重试。"
+                    } else {
+                        "网页结构可能已经变化，未找到输入框或发送按钮。"
+                    }
+                )
+                return@launchGeneration
             }
 
             DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint attachments=$attachmentCount")
-            status = "等待 ${provider.name} 回复…"
+            setStatus(currentSession, "等待 ${provider.name} 回复…")
             awaitProviderResponse(
                 runtime = runtime,
                 currentSession = currentSession,
@@ -149,64 +168,94 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun runProviderAction(action: String, runtime: WebRuntime) {
-        if (action == "retry" || action == "continue") {
-            if (isGenerating) return
-        }
         val currentSession = session
         val provider = selectedProvider
+        val generationAction = action == "retry" || action == "continue"
+        if (generationAction && isSessionGenerating(currentSession)) return
+
+        if (generationAction) {
+            launchGeneration(currentSession) {
+                val baselineResponse = responseBaseline(runtime, currentSession, provider)
+                val result = runCatching { runtime.performAction(currentSession, provider, action) }
+                    .onFailure { DiagnosticLogger.e("CAP", "provider_action_exception provider=${provider.id} action=$action", it) }
+                    .getOrDefault("")
+
+                if (result != "ok" && result != "scheduled") {
+                    setStatus(currentSession, "${provider.name} 当前页面不支持此操作（$action）。")
+                    return@launchGeneration
+                }
+
+                setGenerating(currentSession, true)
+                setStatus(currentSession, if (action == "retry") "正在重新生成…" else "正在继续生成…")
+                awaitProviderResponse(
+                    runtime = runtime,
+                    currentSession = currentSession,
+                    provider = provider,
+                    baselineResponse = baselineResponse,
+                    replaceLastAssistant = true,
+                    source = "action:$action"
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            val generationAction = action == "retry" || action == "continue"
-            val baselineResponse = if (generationAction) responseBaseline(runtime, currentSession, provider) else ""
             val result = runCatching { runtime.performAction(currentSession, provider, action) }
                 .onFailure { DiagnosticLogger.e("CAP", "provider_action_exception provider=${provider.id} action=$action", it) }
                 .getOrDefault("")
 
             if (result != "ok" && result != "scheduled") {
-                status = "${provider.name} 当前页面不支持此操作（$action）。"
+                setStatus(currentSession, "${provider.name} 当前页面不支持此操作（$action）。")
                 return@launch
             }
 
-            when (action) {
-                "retry", "continue" -> {
-                    isGenerating = true
-                    status = if (action == "retry") "正在重新生成…" else "正在继续生成…"
-                    awaitProviderResponse(
-                        runtime = runtime,
-                        currentSession = currentSession,
-                        provider = provider,
-                        baselineResponse = baselineResponse,
-                        replaceLastAssistant = true,
-                        source = "action:$action"
-                    )
-                }
-                "deleteConversation" -> {
-                    messages.clear()
-                    conversationStore.clear(currentSession)
-                    status = null
-                }
-                else -> status = null
+            if (action == "deleteConversation") {
+                conversationStore.clear(currentSession)
+                unreadSessions[currentSession.storageKey] = false
+                if (isCurrentSession(currentSession)) messages.clear()
             }
+            setStatus(currentSession, null)
         }
     }
 
     fun stop(runtime: WebRuntime) {
+        val currentSession = session
+        val provider = selectedProvider
         viewModelScope.launch {
-            DiagnosticLogger.i("CHAT", "stop_requested provider=$selectedProviderId")
-            runtime.stop(session, selectedProvider)
-            isGenerating = false
-            status = "已请求停止生成"
+            DiagnosticLogger.i("CHAT", "stop_requested provider=${provider.id} account=${safeAccountId(currentSession.accountId)}")
+            generationJobs.remove(currentSession.storageKey)?.cancel()
+            runtime.stop(currentSession, provider)
+            setGenerating(currentSession, false)
+            setStatus(currentSession, "已请求停止生成")
         }
     }
 
     fun newChat(runtime: WebRuntime) {
-        if (isGenerating) return
         val current = session
-        DiagnosticLogger.i("CHAT", "new_chat provider=$selectedProviderId account=${safeAccountId(current.accountId)}")
+        if (isSessionGenerating(current)) {
+            setStatus(current, "当前对话正在生成，请先停止后再新建对话。")
+            return
+        }
+        val provider = selectedProvider
+        DiagnosticLogger.i("CHAT", "new_chat provider=${provider.id} account=${safeAccountId(current.accountId)}")
         messages.clear()
         conversationStore.clear(current)
+        unreadSessions[current.storageKey] = false
         viewModelScope.launch {
-            runtime.newChat(current, selectedProvider)
-            status = null
+            runtime.newChat(current, provider)
+            setStatus(current, null)
+        }
+    }
+
+    private fun launchGeneration(target: SessionKey, block: suspend () -> Unit) {
+        val key = target.storageKey
+        generationJobs[key]?.cancel()
+        generationJobs[key] = viewModelScope.launch {
+            try {
+                block()
+            } finally {
+                generationJobs.remove(key)
+            }
         }
     }
 
@@ -267,7 +316,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
                 DiagnosticLogger.d(
                     "CHAT",
-                    "response_poll provider=${provider.id} poll=$poll source=$source responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse}"
+                    "response_poll provider=${provider.id} poll=$poll source=$source responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse} background=${!isCurrentSession(currentSession)}"
                 )
                 if (response.isBlank() || !freshResponse) {
                     val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
@@ -285,11 +334,11 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 last = response
                 if (!generating && stableCount >= 2) {
                     commitAssistantResponse(response, currentSession, replaceLastAssistant)
-                    isGenerating = false
-                    status = null
+                    setGenerating(currentSession, false)
+                    setStatus(currentSession, null)
                     DiagnosticLogger.i(
                         "CHAT",
-                        "response_completed provider=${provider.id} source=$source responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length}"
+                        "response_completed provider=${provider.id} source=$source responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length} background=${!isCurrentSession(currentSession)}"
                     )
                     return
                 }
@@ -303,8 +352,8 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     "CHAT",
                     "response_extract_failed provider=${provider.id} poll=$poll source=$source probe=${DiagnosticLogger.scrub(probe).take(1400)}"
                 )
-                isGenerating = false
-                status = "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。"
+                setGenerating(currentSession, false)
+                setStatus(currentSession, "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。")
                 return
             }
         }
@@ -312,8 +361,8 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         if (last.isNotBlank()) {
             commitAssistantResponse(last, currentSession, replaceLastAssistant)
         }
-        isGenerating = false
-        status = if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null
+        setGenerating(currentSession, false)
+        setStatus(currentSession, if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null)
         DiagnosticLogger.w(
             "CHAT",
             "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.length} baselineChars=${baselineResponse.length}"
@@ -321,26 +370,49 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun commitAssistantResponse(text: String, target: SessionKey, replaceLastAssistant: Boolean) {
+        val targetMessages = conversationStore.load(target).toMutableList()
         if (replaceLastAssistant) {
-            val index = messages.indexOfLast { it.role == MessageRole.ASSISTANT }
+            val index = targetMessages.indexOfLast { it.role == MessageRole.ASSISTANT }
             if (index >= 0) {
-                messages[index] = messages[index].copy(text = text, timestamp = System.currentTimeMillis())
+                targetMessages[index] = targetMessages[index].copy(text = text, timestamp = System.currentTimeMillis())
             } else {
-                messages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
+                targetMessages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
             }
         } else {
-            messages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
+            targetMessages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
         }
-        persist(target)
+        conversationStore.save(target, targetMessages)
+
+        if (isCurrentSession(target)) {
+            messages.clear()
+            messages.addAll(targetMessages)
+            unreadSessions[target.storageKey] = false
+        } else {
+            unreadSessions[target.storageKey] = true
+        }
     }
+
+    private fun setGenerating(target: SessionKey, value: Boolean) {
+        if (value) generatingSessions[target.storageKey] = true else generatingSessions.remove(target.storageKey)
+    }
+
+    private fun isSessionGenerating(target: SessionKey): Boolean = generatingSessions[target.storageKey] == true
+
+    private fun setStatus(target: SessionKey, value: String?) {
+        if (value == null) sessionStatuses.remove(target.storageKey) else sessionStatuses[target.storageKey] = value
+    }
+
+    private fun isCurrentSession(target: SessionKey): Boolean = target == session
 
     private fun reloadConversation() {
         messages.clear()
         messages.addAll(conversationStore.load(session))
-        DiagnosticLogger.d("VM", "conversation_loaded provider=$selectedProviderId messages=${messages.size}")
+        unreadSessions[session.storageKey] = false
+        DiagnosticLogger.d(
+            "VM",
+            "conversation_loaded provider=$selectedProviderId messages=${messages.size} generating=${isGenerating} backgroundJobs=${generationJobs.size}"
+        )
     }
-
-    private fun persist(target: SessionKey) = conversationStore.save(target, messages.toList())
 
     private fun safeAccountId(id: String): String = id.take(12)
 
