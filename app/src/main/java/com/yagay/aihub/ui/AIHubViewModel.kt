@@ -90,13 +90,21 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         showWeb = false
     }
 
-    fun send(prompt: String, runtime: WebRuntime) {
+    fun send(prompt: String, runtime: WebRuntime, attachmentCount: Int = 0) {
         val text = prompt.trim()
-        if (text.isBlank() || isGenerating) return
+        if ((text.isBlank() && attachmentCount <= 0) || isGenerating) return
         val currentSession = session
         val provider = selectedProvider
-        DiagnosticLogger.i("CHAT", "send_started provider=${provider.id} account=${safeAccountId(currentSession.accountId)} promptChars=${text.length}")
-        messages += ChatMessage(role = MessageRole.USER, text = text)
+        DiagnosticLogger.i(
+            "CHAT",
+            "send_started provider=${provider.id} account=${safeAccountId(currentSession.accountId)} promptChars=${text.length} attachments=$attachmentCount"
+        )
+        val visibleUserText = when {
+            attachmentCount > 0 && text.isBlank() -> "📎 $attachmentCount 个附件"
+            attachmentCount > 0 -> "$text\n\n📎 $attachmentCount 个附件"
+            else -> text
+        }
+        messages += ChatMessage(role = MessageRole.USER, text = visibleUserText)
         persist(currentSession)
 
         viewModelScope.launch {
@@ -110,9 +118,6 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 DiagnosticLogger.w("CHAT", "login_preflight_false provider=${provider.id} action=try_send_anyway")
             }
 
-            // Capture the previous assistant text before submitting. Some sites
-            // keep the old reply in the DOM while a new turn is being created;
-            // without a baseline that stale text can be mistaken for the new reply.
             val baselineResponse = runCatching { runtime.lastResponse(currentSession, provider) }
                 .onFailure { DiagnosticLogger.w("CHAT", "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}") }
                 .getOrDefault("")
@@ -122,7 +127,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 .onFailure { DiagnosticLogger.e("CHAT", "send_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
             if (!sent) {
-                DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint")
+                DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint attachments=$attachmentCount")
                 isGenerating = false
                 showWeb = true
                 status = if (!loggedInHint) {
@@ -133,7 +138,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint")
+            DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint attachments=$attachmentCount")
             status = "等待 ${provider.name} 回复…"
             var last = ""
             var stableCount = 0
@@ -158,10 +163,6 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     idleAfterGenerating = 0
                 }
 
-                // If a provider exposes a reliable generating signal, allow an
-                // identical final answer after that generation cycle has ended.
-                // Providers such as Gemini that never expose that signal still
-                // require the DOM text to change from the pre-send baseline.
                 val identicalAfterGeneration = response.isNotBlank() &&
                     response == baselineResponse &&
                     sawGenerating &&
