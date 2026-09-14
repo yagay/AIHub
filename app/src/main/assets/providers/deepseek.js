@@ -37,6 +37,49 @@ window.__AIHUB_CONFIG__ = {
     "[class*='assistant-message']",
     "[class*='think-content']"
   ],
+  modelSelectors: [
+    "button[aria-label*='model' i]",
+    "[role='button'][aria-label*='model' i]",
+    "[data-testid*='model' i]"
+  ],
+  searchSelectors: [
+    "button[aria-label*='search' i]",
+    "[role='button'][aria-label*='search' i]",
+    "[data-testid*='search' i]"
+  ],
+  reasoningSelectors: [
+    "button[aria-label*='deepthink' i]",
+    "[role='button'][aria-label*='deepthink' i]",
+    "button[aria-label*='think' i]",
+    "[data-testid*='think' i]"
+  ],
+  retrySelectors: [
+    "button[aria-label*='regenerate' i]",
+    "button[aria-label*='retry' i]",
+    "[role='button'][aria-label*='regenerate' i]"
+  ],
+  continueSelectors: [
+    "button[aria-label*='continue' i]",
+    "[role='button'][aria-label*='continue' i]"
+  ],
+  copyButtonSelectors: [
+    "button[aria-label*='copy' i]",
+    "[role='button'][aria-label*='copy' i]"
+  ],
+  editSelectors: [
+    "button[aria-label*='edit' i]",
+    "[role='button'][aria-label*='edit' i]"
+  ],
+  historySelectors: [
+    "a[href^='/a/chat/s/']",
+    "a[href*='/chat/s/']",
+    "nav a[href*='/chat/']"
+  ],
+  conversationMenuSelectors: [
+    "button[aria-label*='chat options' i]",
+    "[role='button'][aria-label*='chat options' i]",
+    "button[aria-haspopup='menu'][aria-label*='conversation' i]"
+  ],
   stopSelectors: [
     "div.ds-button--primary.ds-button--circle:not(.ds-button--disabled)"
   ],
