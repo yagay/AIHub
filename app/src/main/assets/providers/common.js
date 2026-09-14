@@ -3,6 +3,16 @@
   const sendState = window.__AIHUB_SEND_STATE__ || (window.__AIHUB_SEND_STATE__ = {});
   const attachmentState = window.__AIHUB_ATTACHMENT_STATE__ || (window.__AIHUB_ATTACHMENT_STATE__ = {});
 
+  const simpleHash = (value) => {
+    let hash = 2166136261;
+    const source = String(value || "");
+    for (let i = 0; i < source.length; i++) {
+      hash ^= source.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
+  };
+
   const all = (selectors) => {
     const seen = new Set();
     const out = [];
@@ -329,7 +339,7 @@
         copyButtonCount: copyButtons.length,
         lastTurn: nodeSummary(turns.length ? turns[turns.length - 1] : null),
         stopCount: all(cfg.stopSelectors).length,
-        path: location.pathname,
+        pathHash: simpleHash(location.pathname),
         bodyChars: (document.body?.innerText || "").length,
         submission: currentSubmissionStatus()
       };
