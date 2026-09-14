@@ -1,220 +1,76 @@
 # AIHub
 
-AIHub is a lightweight Android client that presents several official AI websites behind one reusable native interface.
+AIHub is a clean-room Android client that unifies official AI web apps behind one native chat UI.
 
-It does **not** compile Chromium and does not use API keys for the built-in web providers. Starting with **0.3.0**, AIHub embeds **Mozilla GeckoView** instead of Android System WebView so the app owns a browser-grade engine and is not tied to the device WebView implementation.
+## Architecture
 
-Built-in providers:
+- **Native UI:** Kotlin + Jetpack Compose + Material 3.
+- **Provider/account layer:** one provider can have multiple accounts.
+- **Session isolation:** AndroidX WebKit Multi-Profile gives each account independent cookies and web storage when supported by the installed Android System WebView.
+- **Provider adapters:** DOM automation is isolated in `app/src/main/assets/providers/`.
+- **Official web apps:** authentication, subscriptions and model availability remain on the providers' official websites; web mode does not require provider API keys.
+
+The implementation is clean-room code. Its architecture is inspired by the ideas behind modern Android AI clients, AI Bridge-style account separation, MultAI-style provider adapters, and robust Android WebView wrappers; source code from those projects is not copied into this repository.
+
+## Initial providers
 
 - ChatGPT
 - Claude
 - Gemini
 - Grok
 - DeepSeek
+- Qwen
 
-Current version: **0.3.0**
-
-## Why GeckoView
-
-The old 0.2.x Android WebView design proved too fragile for real sign-in flows and provider DOM integration. AIHub 0.3.0 replaces that layer rather than adding provider-specific WebView workarounds.
-
-GeckoView gives AIHub:
-
-- one embedded browser engine for every provider;
-- persistent per-account browser contexts;
-- browser content integration through a bundled WebExtension;
-- shared popup, file-prompt and navigation handling;
-- no dependency on the Android System WebView version installed on the device.
-
-## WEB and APP mode
-
-AIHub always starts a provider in **WEB** mode.
-
-WEB mode displays the complete official website and is the correct place for:
-
-- sign-in and verification;
-- provider settings;
-- model/tool selection not mapped to native controls;
-- any page for which AIHub does not currently understand the chat composer.
-
-Tapping **WEB** requests APP mode. AIHub does not switch immediately. The bundled bridge first probes the live top-level page. APP mode is enabled only when a usable chat composer is detected on a trusted provider host.
-
-If the probe fails, AIHub remains in WEB mode instead of covering the website with an empty native surface.
-
-## Native APP mode
-
-APP mode uses one shared native interface for all providers:
+## Flow
 
 ```text
-Native composer / message list
-          ↕
-AiProviderAdapter commands
-          ↕
-GeckoView built-in WebExtension
-          ↕
-official provider webpage
+Compose UI
+   ↓
+AIHubViewModel
+   ↓
+Provider + Account + SessionKey
+   ↓
+WebRuntime (Android WebView)
+   ↓
+Provider JavaScript adapter
+   ↓
+Official AI website
 ```
 
-The WebExtension performs shared operations such as:
+Tap the globe icon to log into the selected official website. Return to the native chat screen and AIHub injects prompts and reads the latest assistant reply through that provider's adapter.
 
-- capability probing;
-- filling the real website composer;
-- send/new-chat/stop/attachment actions;
-- normalizing rendered user/assistant messages into `ChatMessage(role, text)`.
+## Multi-account
 
-Provider-specific differences remain data in:
-
-```text
-app/src/main/assets/providers.json
-```
-
-Normal website changes should therefore require selector updates rather than Android UI/session rewrites.
-
-## Login behavior
-
-AIHub no longer uses Android WebView for provider login. Authentication runs inside the same Gecko session that later owns the chat session, so provider cookies and storage remain in that account context.
-
-Authentication policy is still controlled by each website or identity provider. For example, an identity provider may reject an embedded sign-in method even when the underlying browser engine is capable of rendering it. AIHub does not bypass those policies.
-
-## Multi-account isolation
-
-AIHub stores only local account labels and stable IDs. It never stores website passwords.
-
-Each provider/account pair receives a stable Gecko `contextId`, for example:
-
-```text
-aihub_chatgpt_<account-id>
-aihub_claude_<account-id>
-```
-
-GeckoView partitions cookie/storage state by that context. Switching provider or account retains its `GeckoSession`; the visible `GeckoView` attaches to the selected session.
-
-## Architecture
-
-```text
-providers.json
-      ↓
-ProviderRegistry
-      ↓
-AiProviderAdapter
-      ↓
-GenericWebProviderAdapter
-      ↓
-WebSessionManager
-      ├── retained GeckoSession per provider/account
-      ├── GeckoFilePicker
-      └── GeckoView (one visible surface)
-                 ↕
-          GeckoEngine
-                 ↕
-      built-in WebExtension
-                 ↕
-         official AI website
-
-MainActivity
-      ↓
-MainController
-      ↓
-MainScreen
-```
-
-The WebExtension is located in:
-
-```text
-app/src/main/assets/aihub_bridge/
-├── manifest.json
-└── content.js
-```
-
-## Provider configuration
-
-`providers.json` contains only provider-specific data:
-
-- home URL;
-- trusted hosts;
-- composer selectors;
-- send/new-chat/stop selectors;
-- attachment selectors;
-- user-message selectors;
-- assistant-message selectors.
-
-The shared bridge prefers configured selectors and uses semantic fallbacks where safe. Provider commands are accepted only from a top-level page connected to the matching retained Gecko session, and native actions are allowed only on the configured trusted provider host.
-
-## File upload
-
-Website file prompts use one shared Android document picker (`GeckoFilePicker`). Providers do not contain Android file-picker code.
-
-## External Android integration
-
-AIHub registers as a `text/plain` share target. Text shared from another Android app is placed in the native composer for review; it is never automatically submitted.
-
-## Updating a provider
-
-Normal maintenance path:
-
-```text
-edit app/src/main/assets/providers.json
-        ↓
-python3 tools/validate_providers.py
-        ↓
-GitHub Actions: assembleDebug + lintDebug
-```
-
-If a provider eventually needs behavior that cannot be expressed by the shared commands/selectors, add a dedicated `AiProviderAdapter`. Do not add provider-name conditionals to `MainScreen`, `MainController` or `WebSessionManager`.
-
-## Project structure
-
-```text
-AIHub/
-├── app/src/main/
-│   ├── assets/
-│   │   ├── providers.json
-│   │   └── aihub_bridge/
-│   └── java/com/yagay/aihub/
-│       ├── app/
-│       ├── data/
-│       ├── model/
-│       ├── provider/
-│       ├── session/
-│       ├── ui/
-│       └── web/
-├── tools/validate_providers.py
-├── docs/ARCHITECTURE.md
-└── .github/workflows/core.yml
-```
+Each account maps to a dedicated AndroidX WebKit profile. If `MULTI_PROFILE` is unavailable in the installed WebView implementation, AIHub keeps one default session per provider and refuses creation of extra accounts rather than mixing cookies.
 
 ## Build
 
-Requirements:
-
-```text
-Java 17
-Android SDK 37.1 (compile SDK)
-Android target SDK 36
-Gradle 9.6
-AGP 9.4.0
-```
-
-Build:
+- JDK 17
+- Gradle 9.4.1
+- Android Gradle Plugin 9.2.0
+- compileSdk / targetSdk 37
 
 ```bash
 gradle :app:assembleDebug
 ```
 
-Lint:
+GitHub Actions builds and uploads `AIHub-debug` on every push to `main`.
 
-```bash
-gradle :app:lintDebug
-```
-
-APK:
+## Adapter layout
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+app/src/main/assets/providers/
+├── common.js
+├── chatgpt.js
+├── claude.js
+├── gemini.js
+├── grok.js
+├── deepseek.js
+└── qwen.js
 ```
 
-## Maintenance rule
+Website DOMs change frequently. The architecture intentionally keeps selectors outside the Kotlin UI so provider breakage can be repaired by updating a small JavaScript adapter instead of rewriting the app.
 
-Keep provider differences in configuration or provider adapters. Keep browser/session/UI infrastructure shared.
+## Next layers
 
-The objective is that fixing one provider does not create a second implementation of accounts, navigation, native UI, file selection or browser-session management.
+The new baseline is ready for richer Markdown, file upload, provider model controls, remote adapter rule updates, conversation export, background execution and an optional local OpenAI-compatible endpoint.
