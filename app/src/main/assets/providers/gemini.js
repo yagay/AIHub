@@ -14,6 +14,20 @@ window.__AIHUB_CONFIG__ = {
     "button[aria-label*='New chat' i]",
     "a[href='/app']"
   ],
+  attachmentButtonSelectors: [
+    "button[aria-label='Upload & tools']",
+    "button[aria-label='Open upload file menu']",
+    "button[aria-label*='Upload & tools' i]",
+    "button[aria-label*='upload file menu' i]",
+    "button[aria-label*='Upload' i]"
+  ],
+  uploadMenuItemSelectors: [
+    "images-files-uploader[data-test-id='uploader-images-files-button-advanced']",
+    "[data-test-id='local-images-files-uploader-icon']",
+    "[data-test-id='uploader-images-files-button-advanced']",
+    "images-files-uploader",
+    "[role='menuitem'] [data-test-id*='uploader' i]"
+  ],
   sendSelectors: [
     "button[aria-label='Send message']",
     "button[aria-label*='Send' i]",
