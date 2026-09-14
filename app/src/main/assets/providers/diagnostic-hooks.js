@@ -31,7 +31,13 @@
 
   const emitLater = (phase, delay) => setTimeout(() => emit(`${phase}+${delay}ms`), delay);
 
-  const wrap = (name, delays = [250, 1000, 3000]) => {
+  const delaysFor = (name) => {
+    if (name === "send") return [250, 1000, 3000, 6000, 9000, 12500];
+    if (name === "attachStagedFiles" || name === "prepareAttachmentInput") return [250, 1000, 3000, 6000];
+    return [250, 1000, 3000];
+  };
+
+  const wrap = (name) => {
     if (state.wrapped[name] || typeof api[name] !== "function") return;
     const original = api[name];
     state.wrapped[name] = true;
@@ -50,7 +56,7 @@
         throw error;
       }
       emit(`${name}:after`);
-      delays.forEach((delay) => emitLater(name, delay));
+      delaysFor(name).forEach((delay) => emitLater(name, delay));
       return result;
     };
   };
