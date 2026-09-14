@@ -172,9 +172,11 @@ public final class DiagnosticsExporter {
         java.lang.Process process = null;
         try {
             String inner = shell(command);
-            String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+            String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ] "
+                    + "&& nsenter -t 1 -m -- sh -c 'exit 0' 2>/dev/null; then "
                     + "echo namespace=pid1-nsenter; nsenter -t 1 -m -- sh -c " + inner
-                    + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                    + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ] "
+                    + "&& toybox nsenter -t 1 -m -- sh -c 'exit 0' 2>/dev/null; then "
                     + "echo namespace=pid1-toybox-nsenter; toybox nsenter -t 1 -m -- sh -c " + inner
                     + "; else echo namespace=caller-fallback; sh -c " + inner + "; fi";
             process = new ProcessBuilder("su", "-c", namespaced).redirectErrorStream(true).start();

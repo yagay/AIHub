@@ -197,9 +197,9 @@ public final class TitaniumManager {
     private void assertRoot() throws Exception {
         String uid;
         try {
-            uid = runSu("id -u", 30).trim();
+            uid = runSuRaw("id -u", 30).trim();
         } catch (Exception error) {
-            throw new IllegalStateException("无法获得 Root：请在 KernelSU/Magisk 中允许 AIHub。详情: "
+            throw new IllegalStateException("无法获得 Root：请在 KernelSU / KernelSU Next / Magisk 中允许 AIHub。详情: "
                     + error.getMessage(), error);
         }
         if (!"0".equals(uid)) {
@@ -274,48 +274,95 @@ public final class TitaniumManager {
     }
 
     /**
-     * KernelSU/Magisk root can still inherit the caller app's mount namespace on
-     * modern Android. In that namespace another app's /data/user/<id>/<package>
-     * directory may look nonexistent even with uid 0. Prefer PID 1's mount
-     * namespace for Titanium private-data operations, then fall back gracefully
-     * when nsenter is unavailable.
+     * KernelSU/Magisk may grant uid 0 while still leaving the app in its own mount
+     * namespace. Root authorization and mount-namespace access are intentionally
+     * detected separately so a broken nsenter implementation is never reported as
+     * "no root".
      */
-    private static String runSu(String command, int timeoutSeconds) throws Exception {
-        String inner = q(command);
-        String namespaced = "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
-                + "nsenter -t 1 -m -- sh -c " + inner
-                + "; elif toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
-                + "toybox nsenter -t 1 -m -- sh -c " + inner
-                + "; else sh -c " + inner + "; fi";
+    private static volatile String namespaceMode;
 
-        ProcessBuilder builder = new ProcessBuilder("su", "-c", namespaced);
-        builder.redirectErrorStream(true);
-        java.lang.Process process;
-        try {
-            process = builder.start();
-        } catch (Exception error) {
-            throw new IllegalStateException("系统找不到 su 命令", error);
+    private static String runSuRaw(String command, int timeoutSeconds) throws Exception {
+        java.lang.Process process = null;
+        Exception startError = null;
+        String[] candidates = {"su", "/system/bin/su", "/system/xbin/su", "/sbin/su"};
+        for (String candidate : candidates) {
+            try {
+                process = new ProcessBuilder(candidate, "-c", command)
+                        .redirectErrorStream(true)
+                        .start();
+                break;
+            } catch (Exception error) {
+                startError = error;
+            }
+        }
+        if (process == null) {
+            throw new IllegalStateException("系统找不到可用的 su 命令", startError);
         }
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
+        java.lang.Process runningProcess = process;
         Thread reader = new Thread(() -> {
-            try (InputStream in = process.getInputStream()) {
+            try (InputStream in = runningProcess.getInputStream()) {
                 byte[] buffer = new byte[8192];
                 int count;
                 while ((count = in.read(buffer)) >= 0) if (count > 0) output.write(buffer, 0, count);
             } catch (Exception ignored) {}
-        });
+        }, "AIHub-su-reader");
         reader.start();
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
             process.destroyForcibly();
+            reader.join(1000);
             throw new IllegalStateException("Root 命令等待超时");
         }
         reader.join(1000);
-        String text = new String(output.toByteArray(), StandardCharsets.UTF_8);
+        String result = new String(output.toByteArray(), StandardCharsets.UTF_8);
         if (process.exitValue() != 0) {
-            throw new IllegalStateException("su exit=" + process.exitValue() + ": " + text.trim());
+            throw new IllegalStateException("su exit=" + process.exitValue() + ": " + result.trim());
         }
-        return text;
+        return result;
+    }
+
+    private static String resolveNamespaceMode() throws Exception {
+        String cached = namespaceMode;
+        if (cached != null) return cached;
+        synchronized (TitaniumManager.class) {
+            if (namespaceMode != null) return namespaceMode;
+
+            String probe = runSuRaw(
+                    "if command -v nsenter >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                            + "nsenter -t 1 -m -- sh -c 'printf AIHUB_NS_OK' 2>/dev/null || true; fi",
+                    8).trim();
+            if ("AIHUB_NS_OK".equals(probe)) {
+                namespaceMode = "nsenter";
+                return namespaceMode;
+            }
+
+            probe = runSuRaw(
+                    "if toybox nsenter --help >/dev/null 2>&1 && [ -r /proc/1/ns/mnt ]; then "
+                            + "toybox nsenter -t 1 -m -- sh -c 'printf AIHUB_NS_OK' 2>/dev/null || true; fi",
+                    8).trim();
+            if ("AIHUB_NS_OK".equals(probe)) {
+                namespaceMode = "toybox";
+                return namespaceMode;
+            }
+
+            namespaceMode = "caller";
+            return namespaceMode;
+        }
+    }
+
+    private static String runSu(String command, int timeoutSeconds) throws Exception {
+        String inner = q(command);
+        String mode = resolveNamespaceMode();
+        String wrapped;
+        if ("nsenter".equals(mode)) {
+            wrapped = "nsenter -t 1 -m -- sh -c " + inner;
+        } else if ("toybox".equals(mode)) {
+            wrapped = "toybox nsenter -t 1 -m -- sh -c " + inner;
+        } else {
+            wrapped = "sh -c " + inner;
+        }
+        return runSuRaw(wrapped, timeoutSeconds);
     }
 
     private static String q(String value) {
