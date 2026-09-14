@@ -1,6 +1,7 @@
 package com.yagay.aihub.data
 
 import android.content.Context
+import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.model.SessionKey
@@ -15,7 +16,29 @@ class ConversationStore(context: Context) {
         buildList {
             for (i in 0 until array.length()) {
                 val o = array.getJSONObject(i)
-                add(ChatMessage(o.getString("id"), MessageRole.valueOf(o.getString("role")), o.getString("text"), o.getLong("timestamp")))
+                val attachments = buildList {
+                    val items = o.optJSONArray("attachments") ?: JSONArray()
+                    for (j in 0 until items.length()) {
+                        val item = items.optJSONObject(j) ?: continue
+                        add(
+                            AttachmentMeta(
+                                id = item.optString("id").ifBlank { "legacy-$i-$j" },
+                                name = item.optString("name").ifBlank { "attachment-${j + 1}" },
+                                mimeType = item.optString("mimeType", "application/octet-stream"),
+                                sizeBytes = item.optLong("sizeBytes", 0L)
+                            )
+                        )
+                    }
+                }
+                add(
+                    ChatMessage(
+                        id = o.getString("id"),
+                        role = MessageRole.valueOf(o.getString("role")),
+                        text = o.getString("text"),
+                        timestamp = o.getLong("timestamp"),
+                        attachments = attachments
+                    )
+                )
             }
         }
     }.getOrDefault(emptyList())
@@ -23,7 +46,24 @@ class ConversationStore(context: Context) {
     fun save(session: SessionKey, messages: List<ChatMessage>) {
         val array = JSONArray()
         messages.takeLast(200).forEach { message ->
-            array.put(JSONObject().put("id", message.id).put("role", message.role.name).put("text", message.text).put("timestamp", message.timestamp))
+            val attachments = JSONArray()
+            message.attachments.forEach { attachment ->
+                attachments.put(
+                    JSONObject()
+                        .put("id", attachment.id)
+                        .put("name", attachment.name)
+                        .put("mimeType", attachment.mimeType)
+                        .put("sizeBytes", attachment.sizeBytes)
+                )
+            }
+            array.put(
+                JSONObject()
+                    .put("id", message.id)
+                    .put("role", message.role.name)
+                    .put("text", message.text)
+                    .put("timestamp", message.timestamp)
+                    .put("attachments", attachments)
+            )
         }
         prefs.edit().putString(session.storageKey, array.toString()).apply()
     }
