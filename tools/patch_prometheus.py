@@ -14,6 +14,26 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
   // exactly which DOM phase is currently running.
   const __aihubAdapter = detectAdapter();
   if (__aihubAdapter && ['chatgpt', 'claude', 'gemini', 'deepseek', 'grok'].includes(__aihubAdapter.key)) {
+    // ChatGPT's composer has changed between ProseMirror/Lexical variants. Keep
+    // Prometheus' upstream selectors but prepend current resilient variants. Avoid
+    // textarea fallbacks here because ChatGPT often keeps a hidden 0x0 textarea.
+    if (__aihubAdapter.key === 'chatgpt') {
+      const extraInputs = [
+        '[data-testid="prompt-textarea"]',
+        '#prompt-textarea.ProseMirror',
+        'div.ProseMirror[contenteditable="true"][role="textbox"]',
+        '[contenteditable="true"][data-lexical-editor="true"]',
+        '[role="textbox"][contenteditable="true"]',
+      ];
+      const extraSend = [
+        '#composer-submit-button',
+        'button[data-testid="send-button"]',
+        'button[data-testid="composer-send-button"]',
+      ];
+      __aihubAdapter.selectors.input = [...new Set([...extraInputs, ...__aihubAdapter.selectors.input])];
+      __aihubAdapter.selectors.send = [...new Set([...extraSend, ...__aihubAdapter.selectors.send])];
+    }
+
     const __aihubPort = chrome.runtime.connect({ name: 'aihub-provider' });
     const __aihubRunning = new Set();
 
@@ -36,6 +56,24 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
       } catch (_) {}
     };
 
+    const __aihubWaitForInput = async (id, adapter, timeoutMs = 20000) => {
+      const deadline = Date.now() + timeoutMs;
+      let announced = false;
+      while (Date.now() < deadline) {
+        const input = findElement(adapter.selectors.input);
+        if (input && input.isConnected) {
+          __aihubProgress(id, 'input_ready');
+          return input;
+        }
+        if (!announced) {
+          __aihubProgress(id, 'waiting_input');
+          announced = true;
+        }
+        await sleep(500);
+      }
+      return null;
+    };
+
     const __aihubRun = async (message) => {
       const id = message.id;
       const prompt = message.prompt || '';
@@ -44,6 +82,15 @@ bridge = r'''  // AIHub addition: keep the MV3 worker alive through a provider-t
       __aihubProgress(id, 'content_received');
 
       try {
+        // A provider content script can connect before the SPA finishes rendering
+        // its composer. Upstream handleSendOnly() probes only once, so wait here
+        // instead of treating a normal render race as a hard DOM failure.
+        const readyInput = await __aihubWaitForInput(id, __aihubAdapter, 20000);
+        if (!readyInput) {
+          __aihubResult(id, '', `${__aihubAdapter.name}: input not ready after 20s`);
+          return;
+        }
+
         // Prometheus' send_only helper includes a 30s duplicate-send guard for
         // its own retry machinery. AIHub command ids already provide deduplication,
         // so clear that guard before every genuine user command.
