@@ -18,7 +18,11 @@ class ScriptLoader(private val context: Context) {
         append('\n')
         append(load("providers/capabilities.js"))
         append('\n')
+        append(load("providers/network-diagnostics.js"))
+        append('\n')
         append(load("providers/diagnostics.js"))
+        append('\n')
+        append(load("providers/diagnostics-augment.js"))
         append('\n')
         append(load("providers/diagnostic-hooks.js"))
     }
