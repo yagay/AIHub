@@ -1,0 +1,51 @@
+name: One-shot stale Titanium extension profile fix
+
+on:
+  push:
+    branches: ['refactor/titanium-extension']
+    paths: ['.github/workflows/fix-stale-extension-profile-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/titanium-extension
+          fetch-depth: 0
+      - name: Purge stale AIHub extension profile versions before activation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java')
+          t = p.read_text(encoding='utf-8')
+
+          old = '''        ensureTitaniumExtensionRegistered();\n        if (extensionFilesChanged) {\n'''
+          new = '''        boolean staleProfileRegistration = purgeStaleExtensionProfileRegistration();\n        ensureTitaniumExtensionRegistered();\n        if (extensionFilesChanged || staleProfileRegistration) {\n'''
+          if old not in t:
+              raise SystemExit('prepare activation marker missing')
+          t = t.replace(old, new, 1)
+
+          marker = '''    private void restartTitaniumForExtensionActivation() throws Exception {\n'''
+          helper = '''    /**\n     * Chromium can unpack a newer external CRX while Preferences still points at an\n     * older installed version. If any stale AIHub build is present, remove only this\n     * extension's profile directory while Titanium is stopped. On the next cold start\n     * the external-extension provider recreates the registration from the current CRX.\n     * Browser cookies, logins, history, tabs, and all other extensions are untouched.\n     */\n    private boolean purgeStaleExtensionProfileRegistration() throws Exception {\n        if (extensionBuildId == null || extensionBuildId.isEmpty()) return false;\n        String profiles = titaniumDataDir + "/app_chrome";\n        String extensionRootGlob = profiles + "/*/Extensions/" + extensionId;\n        String detect = "stale=; for root in " + q(extensionRootGlob)\n                + "; do [ -d \\\"$root\\\" ] || continue; "\n                + "for v in \\\"$root\\\"/*; do [ -d \\\"$v\\\" ] || continue; "\n                + "actual=$(cat \\\"$v/" + BUILD_ID_FILE + "\\\" 2>/dev/null || true); "\n                + "[ \\\"$actual\\\" = " + q(extensionBuildId) + " ] || stale=yes; done; done; "\n                + "[ -n \\\"$stale\\\" ] && echo yes || true";\n        if (!"yes".equals(runSu(detect, 8).trim())) return false;\n\n        String purge = "am force-stop " + PACKAGE + "; sleep 1; "\n                + "for root in " + q(extensionRootGlob)\n                + "; do [ -d \\\"$root\\\" ] && rm -rf \\\"$root\\\"; done; true";\n        runSu(purge, 12);\n        launched.clear();\n        return true;\n    }\n\n'''
+          if marker not in t:
+              raise SystemExit('restart method marker missing')
+          t = t.replace(marker, helper + marker, 1)
+          p.write_text(t, encoding='utf-8')
+          PY
+      - name: Verify patch
+        run: |
+          grep -q 'purgeStaleExtensionProfileRegistration' app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          grep -q 'extensionFilesChanged || staleProfileRegistration' app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          grep -q 'rm -rf' app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          git diff --check
+      - name: Commit source fix
+        run: |
+          git config user.name 'AIHub CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          git commit -m 'Purge stale Titanium extension profile registration'
+          git push origin HEAD:refactor/titanium-extension
