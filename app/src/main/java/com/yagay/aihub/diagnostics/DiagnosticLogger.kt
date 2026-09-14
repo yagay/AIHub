@@ -47,7 +47,9 @@ object DiagnosticLogger {
     fun w(tag: String, message: String, throwable: Throwable? = null) = write("W", tag, message, throwable)
     fun e(tag: String, message: String, throwable: Throwable? = null) = write("E", tag, message, throwable)
 
-    fun suggestedFileName(): String = "AIHub-diagnostic-${fileNameFormat.format(Date())}.zip"
+    fun suggestedFileName(): String = synchronized(lock) {
+        "AIHub-diagnostic-${fileNameFormat.format(Date())}.zip"
+    }
 
     fun clear() {
         val ctx = appContext ?: return
@@ -88,11 +90,15 @@ object DiagnosticLogger {
         e("EXPORT", "diagnostic_export_failed type=${it.javaClass.simpleName} message=${scrub(it.message.orEmpty())}", it)
     }
 
-    fun scrub(value: String): String {
+    fun scrub(value: String, maxLength: Int = 1200): String {
         var out = value
-        out = out.replace(Regex("(?i)(authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|token|code)=([^&\\s]+)"), "$1=<redacted>")
-        out = out.replace(Regex("(https?://[^\\s?#]+)(?:\\?[^\\s#]*)?(?:#[^\\s]*)?"), "$1?<redacted>")
-        if (out.length > 1200) out = out.take(1200) + "…"
+        out = out.replace(
+            Regex("(?i)(authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|token|code)=([^&\\s]+)")
+        ) { match -> "${match.groupValues[1]}=<redacted>" }
+        out = out.replace(
+            Regex("(https?://[^\\s?#]+)(?:\\?[^\\s#]*)?(?:#[^\\s]*)?")
+        ) { match -> "${match.groupValues[1]}?<redacted>" }
+        if (out.length > maxLength) out = out.take(maxLength) + "…"
         return out
     }
 
@@ -101,7 +107,7 @@ object DiagnosticLogger {
         val safeMessage = scrub(message.replace('\u0000', ' '))
         val safeTag = tag.replace(Regex("[^A-Za-z0-9_.-]"), "_").take(40)
         val line = buildString {
-            append(timestampFormat.format(Date()))
+            append(synchronized(lock) { timestampFormat.format(Date()) })
             append(' ')
             append(level)
             append('/')
@@ -112,7 +118,7 @@ object DiagnosticLogger {
             append(safeMessage)
             if (throwable != null) {
                 append('\n')
-                append(scrub(Log.getStackTraceString(throwable)))
+                append(scrub(Log.getStackTraceString(throwable), 12000))
             }
             append('\n')
         }
@@ -152,10 +158,18 @@ object DiagnosticLogger {
     private fun buildDiagnosticInfo(context: Context): String = buildString {
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         val webViewPackage = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
-        appendLine("generated=${timestampFormat.format(Date())}")
+        val versionCode = if (packageInfo == null) {
+            BuildConfig.VERSION_CODE.toLong()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        appendLine("generated=${synchronized(lock) { timestampFormat.format(Date()) }}")
         appendLine("package=${context.packageName}")
         appendLine("versionName=${packageInfo?.versionName ?: BuildConfig.VERSION_NAME}")
-        appendLine("versionCode=${packageInfo?.longVersionCode ?: BuildConfig.VERSION_CODE.toLong()}")
+        appendLine("versionCode=$versionCode")
         appendLine("buildType=${BuildConfig.BUILD_TYPE}")
         appendLine("manufacturer=${Build.MANUFACTURER}")
         appendLine("brand=${Build.BRAND}")
