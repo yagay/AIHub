@@ -1,5 +1,7 @@
 package com.yagay.aihub.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -73,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
@@ -164,6 +167,26 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
         }
     }
 
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(context, "需要麦克风权限才能使用网页语音功能。", Toast.LENGTH_SHORT).show()
+        } else {
+            val provider = viewModel.selectedProvider
+            val targetSession = viewModel.session
+            scope.launch {
+                val result = runCatching { runtime.performAction(targetSession, provider, "voice") }.getOrDefault("")
+                Toast.makeText(
+                    context,
+                    if (result == "ok" || result == "scheduled") "${provider.name}：已打开语音功能" else "${provider.name}：当前页面没有找到语音入口",
+                    Toast.LENGTH_SHORT
+                ).show()
+                if (result == "ok" || result == "scheduled") viewModel.openWeb()
+            }
+        }
+    }
+
     fun refreshCapabilities(openDialog: Boolean = true) {
         val provider = viewModel.selectedProvider
         val targetSession = viewModel.session
@@ -183,7 +206,12 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
         scope.launch {
             val opened = runCatching { runtime.openOptionPicker(targetSession, provider, kind) }.getOrDefault("")
             if (opened != "ok") {
-                Toast.makeText(context, "${provider.name} 当前没有找到${if (kind == "model") "模型" else "工具"}入口。", Toast.LENGTH_SHORT).show()
+                val label = when (kind) {
+                    "model" -> "模型"
+                    "tool" -> "工具"
+                    else -> "模式"
+                }
+                Toast.makeText(context, "${provider.name} 当前没有找到${label}入口。", Toast.LENGTH_SHORT).show()
                 return@launch
             }
             delay(260)
@@ -193,8 +221,13 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                 values = runCatching { runtime.optionList(targetSession, provider, kind) }.getOrDefault(emptyList())
             }
             if (values.isEmpty()) {
-                Toast.makeText(context, "没有读取到选项，已打开官网。", Toast.LENGTH_SHORT).show()
-                viewModel.openWeb()
+                if (kind == "mode") {
+                    Toast.makeText(context, "${provider.name}：已切换思考 / 推理状态。", Toast.LENGTH_SHORT).show()
+                    refreshCapabilities(openDialog = false)
+                } else {
+                    Toast.makeText(context, "没有读取到选项，已打开官网。", Toast.LENGTH_SHORT).show()
+                    viewModel.openWeb()
+                }
             } else {
                 optionKind = kind
                 optionValues = values
@@ -360,13 +393,21 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
             onDismiss = { showCapabilities = false },
             onRefresh = { refreshCapabilities(openDialog = false) },
             onModel = { showCapabilities = false; loadOptions("model") },
+            onMode = { showCapabilities = false; loadOptions("mode") },
             onTools = { showCapabilities = false; loadOptions("tool") },
             onAction = { action ->
                 showCapabilities = false
                 when (action) {
                     "retry", "continue" -> viewModel.runProviderAction(action, runtime)
                     "deleteConversation" -> confirmDelete = true
-                    "edit", "history", "rename", "voice" -> performSimpleAction(action, openWebAfter = true)
+                    "voice" -> {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            performSimpleAction("voice", openWebAfter = true)
+                        } else {
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                    "edit", "history", "rename" -> performSimpleAction(action, openWebAfter = true)
                     else -> performSimpleAction(action)
                 }
             }
@@ -375,7 +416,11 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
 
     if (optionKind != null) {
         OptionPickerDialog(
-            title = if (optionKind == "model") "选择模型" else "选择工具",
+            title = when (optionKind) {
+                "model" -> "选择模型"
+                "mode" -> "选择思考 / 推理模式"
+                else -> "选择工具"
+            },
             values = optionValues,
             onDismiss = { optionKind = null; optionValues = emptyList() },
             onSelect = { value ->
@@ -422,6 +467,7 @@ private fun CapabilityDialog(
     onDismiss: () -> Unit,
     onRefresh: () -> Unit,
     onModel: () -> Unit,
+    onMode: () -> Unit,
     onTools: () -> Unit,
     onAction: (String) -> Unit
 ) {
@@ -455,7 +501,7 @@ private fun CapabilityDialog(
                     }
                     if (capabilities.model) item { FeatureButton("模型选择", onModel) }
                     if (capabilities.search) item { FeatureButton("联网搜索", { onAction("search") }) }
-                    if (capabilities.reasoning) item { FeatureButton("思考 / 推理", { onAction("reasoning") }) }
+                    if (capabilities.reasoning) item { FeatureButton("思考 / 推理模式", onMode) }
                     if (capabilities.deepResearch) item { FeatureButton("深度研究", { onAction("deepResearch") }) }
                     if (capabilities.imageGeneration) item { FeatureButton("图像生成", { onAction("imageGeneration") }) }
                     if (capabilities.tools) item { FeatureButton("工具", onTools) }
