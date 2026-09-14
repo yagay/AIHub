@@ -15,11 +15,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses >/dev/null || true
-      - name: Install Android 17 preview SDK
-        run: sdkmanager --channel=3 --install "platforms;android-37.0" "build-tools;37.0.0"
+      - name: Configure Android SDK
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --channel=3 --install \
+            "platform-tools" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0"
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: "9.4.1"
