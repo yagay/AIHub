@@ -125,7 +125,61 @@ public final class TitaniumManager {
                     + externalExtensionsDir);
         }
 
+        ensureTitaniumExtensionRegistered();
         prepared = true;
+    }
+
+    /**
+     * External-extension files are consumed by Chromium when Titanium starts. A first
+     * install/update can leave the browser force-stopped with valid CRX/JSON files but
+     * no profile registration. Cold-start Titanium once and wait for Chromium to
+     * persist the extension into its profile before reporting the bridge as ready.
+     */
+    private void ensureTitaniumExtensionRegistered() throws Exception {
+        if (isExtensionRegistered()) return;
+
+        int uidDerivedUser = android.os.Process.myUid() / 100000;
+        String currentUser = runSu("cmd activity get-current-user 2>/dev/null || am get-current-user 2>/dev/null || echo "
+                + uidDerivedUser, 5).trim();
+        if (currentUser.isEmpty() || !currentUser.matches("\\d+")) {
+            currentUser = String.valueOf(uidDerivedUser);
+        }
+
+        String launch = "am force-stop " + PACKAGE
+                + "; sleep 1; monkey --user " + currentUser + " -p " + PACKAGE
+                + " -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1"
+                + " || am start --user " + currentUser
+                + " -a android.intent.action.VIEW -d 'https://chatgpt.com/' -p " + PACKAGE
+                + " >/dev/null 2>&1 || true";
+        runSu(launch, 10);
+
+        for (int attempt = 0; attempt < 10; attempt++) {
+            if (isExtensionRegistered()) {
+                runSu("am start --activity-reorder-to-front -n com.yagay.aihub/com.yagay.aihub.app.MainActivity"
+                        + " >/dev/null 2>&1 || true", 5);
+                launched.clear();
+                return;
+            }
+            Thread.sleep(1000);
+        }
+
+        runSu("am start --activity-reorder-to-front -n com.yagay.aihub/com.yagay.aihub.app.MainActivity"
+                + " >/dev/null 2>&1 || true", 5);
+        throw new IllegalStateException(
+                "Root 与扩展文件均正常，但 Titanium 启动后仍未注册 AIHub Bridge。"
+                        + "请打开 Titanium 的 chrome://extensions 检查扩展加载状态。");
+    }
+
+    private boolean isExtensionRegistered() throws Exception {
+        String command = "for p in " + q(titaniumDataDir + "/app_chrome")
+                + "/*/Preferences " + q(titaniumDataDir + "/app_chrome")
+                + "/*/'Secure Preferences'; do "
+                + "[ -f \\\"$p\\\" ] && grep -q -F " + q(extensionId)
+                + " \\\"$p\\\" 2>/dev/null && { echo yes; exit 0; }; done; "
+                + "for x in " + q(titaniumDataDir + "/app_chrome")
+                + "/*/Extensions/" + extensionId + "; do "
+                + "[ -d \\\"$x\\\" ] && { echo yes; exit 0; }; done; true";
+        return "yes".equals(runSu(command, 8).trim());
     }
 
     private void ensureChromiumUserData(String uid) throws Exception {
