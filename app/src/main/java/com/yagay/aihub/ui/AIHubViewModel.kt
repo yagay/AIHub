@@ -103,9 +103,6 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             isGenerating = true
             status = "正在连接 ${provider.name}…"
 
-            // Login detection is only a preflight hint. AI websites frequently
-            // change or lazy-render their composer, so a false preflight must
-            // not block an otherwise valid session.
             val loggedInHint = runCatching { runtime.isLoggedIn(currentSession, provider) }
                 .onFailure { DiagnosticLogger.e("CHAT", "login_check_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
@@ -132,18 +129,39 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             status = "等待 ${provider.name} 回复…"
             var last = ""
             var stableCount = 0
-            repeat(180) { poll ->
+            var sawGenerating = false
+            var idleAfterGenerating = 0
+
+            for (poll in 0 until 180) {
                 delay(700)
                 val response = runCatching { runtime.lastResponse(currentSession, provider) }
                     .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll type=${it.javaClass.simpleName}") }
                     .getOrDefault("")
                 val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
 
+                if (generating) {
+                    sawGenerating = true
+                    idleAfterGenerating = 0
+                } else if (sawGenerating && response.isBlank()) {
+                    idleAfterGenerating++
+                } else {
+                    idleAfterGenerating = 0
+                }
+
                 if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
                     DiagnosticLogger.d(
                         "CHAT",
                         "response_poll provider=${provider.id} poll=$poll responseChars=${response.length} generating=$generating"
                     )
+                    if (response.isBlank()) {
+                        val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
+                        if (probe.isNotBlank()) {
+                            DiagnosticLogger.d(
+                                "CHAT",
+                                "dom_probe provider=${provider.id} poll=$poll summary=${DiagnosticLogger.scrub(probe).take(1400)}"
+                            )
+                        }
+                    }
                 }
 
                 if (response.isNotBlank()) {
@@ -158,7 +176,19 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                 }
+
+                if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank()) {
+                    val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
+                    DiagnosticLogger.w(
+                        "CHAT",
+                        "response_extract_failed provider=${provider.id} poll=$poll probe=${DiagnosticLogger.scrub(probe).take(1400)}"
+                    )
+                    isGenerating = false
+                    status = "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。"
+                    return@launch
+                }
             }
+
             if (last.isNotBlank()) {
                 messages += ChatMessage(role = MessageRole.ASSISTANT, text = last)
                 persist(currentSession)
