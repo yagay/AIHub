@@ -5,6 +5,7 @@ window.__AIHUB_CONFIG__ = {
     "#prompt-textarea",
     "[data-testid='prompt-textarea']",
     "textarea[name='prompt-textarea']",
+    "textarea[data-id='prompt-textarea']",
     "div[contenteditable='true'][role='textbox'][aria-label*='Chat' i]",
     "div[contenteditable='true'].ProseMirror",
     "textarea[aria-label*='Chat' i]",
@@ -17,12 +18,15 @@ window.__AIHUB_CONFIG__ = {
     "[data-testid='composer-plus-btn']",
     "a[data-testid='create-new-chat-button']",
     "#history a[href^='/c/']",
+    "#history a[href^='/uc/']",
     "a[href^='/c/']",
+    "a[href^='/uc/']",
     "button[data-testid='model-switcher-dropdown-button']"
   ],
   sendSelectors: [
     "#composer-submit-button",
     "button[data-testid='send-button']",
+    "button[data-testid*='composer-send']",
     "button[aria-label='Send prompt']",
     "button[aria-label='发送提示']",
     "button[aria-label*='Send dictated message' i]",
@@ -30,12 +34,49 @@ window.__AIHUB_CONFIG__ = {
     "form button[type='submit']"
   ],
   responseSelectors: [
+    "article[data-testid^='conversation-turn'][data-message-author-role='assistant']",
+    "article[data-testid^='conversation-turn'][data-turn='assistant']",
+    "article[data-testid^='conversation-turn'] [data-message-author-role='assistant']",
+    "article[data-testid^='conversation-turn'] [data-turn='assistant']",
+    "div[data-testid^='conversation-turn'] [data-message-author-role='assistant']",
+    "div[data-testid^='conversation-turn'] [data-turn='assistant']",
+    "section[data-testid^='conversation-turn'] [data-message-author-role='assistant']",
+    "section[data-testid^='conversation-turn'] [data-turn='assistant']",
     "[data-message-author-role='assistant'] .markdown",
-    "div[data-message-author-role='assistant']",
-    "[data-role='assistant']",
-    "[data-message-author='assistant']",
-    ".agent-turn",
-    "article[data-testid*='conversation-turn'] .markdown"
+    "[data-turn='assistant'] .markdown",
+    "[data-message-author-role='assistant']",
+    "[data-turn='assistant']",
+    ".agent-turn .markdown",
+    ".agent-turn"
+  ],
+  responseContentSelectors: [
+    "[data-message-author-role='assistant'] .markdown",
+    "[data-turn='assistant'] .markdown",
+    ".markdown",
+    ".prose",
+    "[class*='markdown']",
+    "[data-message-author-role='assistant']",
+    "[data-turn='assistant']"
+  ],
+  turnSelectors: [
+    "article[data-testid^='conversation-turn']",
+    "div[data-testid^='conversation-turn']",
+    "section[data-testid^='conversation-turn']",
+    "article[data-message-author-role]",
+    "div[data-message-author-role]",
+    "section[data-message-author-role]",
+    "article[data-turn]",
+    "div[data-turn]",
+    "section[data-turn]"
+  ],
+  assistantMarkerSelectors: [
+    "[data-message-author-role='assistant']",
+    "[data-turn='assistant']"
+  ],
+  copyButtonSelectors: [
+    "button[data-testid='copy-turn-action-button']",
+    "button[aria-label='Copy']",
+    "button[aria-label*='Copy' i]"
   ],
   stopSelectors: [
     "button[data-testid='stop-button']",
