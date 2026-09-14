@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -85,11 +86,51 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     val context = LocalContext.current
     var prompt by remember { mutableStateOf("") }
     var showAddAccount by remember { mutableStateOf(false) }
+    var pendingAttachmentCount by remember { mutableIntStateOf(0) }
+    var pendingAttachmentNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    val attachmentChooser = rememberLauncherForActivityResult(
+    val webFileChooser = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         runtime.handleFileChooserResult(result.resultCode, result.data)
+    }
+
+    val nativeAttachmentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isEmpty()) {
+            DiagnosticLogger.i("FILE", "native_attachment_selection_cancelled")
+        } else {
+            val provider = viewModel.selectedProvider
+            val targetSession = viewModel.session
+            DiagnosticLogger.i("FILE", "native_attachment_selected provider=${provider.id} selected=${uris.size}")
+            scope.launch {
+                val result = runCatching {
+                    runtime.attachFiles(targetSession, provider, uris)
+                }.onFailure {
+                    DiagnosticLogger.e("FILE", "native_attachment_injection_exception provider=${provider.id}", it)
+                }.getOrNull()
+
+                if (result != null && result.attachedCount > 0) {
+                    pendingAttachmentCount = result.attachedCount
+                    pendingAttachmentNames = result.names
+                    Toast.makeText(
+                        context,
+                        "已添加 ${result.attachedCount} 个附件到 ${provider.name}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    pendingAttachmentCount = 0
+                    pendingAttachmentNames = emptyList()
+                    Toast.makeText(
+                        context,
+                        "${provider.name} 当前页面没有接受附件，已打开官网供你检查。",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    viewModel.openWeb()
+                }
+            }
+        }
     }
 
     val exportDiagnostics = rememberLauncherForActivityResult(
@@ -112,11 +153,16 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     }
 
     DisposableEffect(runtime) {
-        runtime.setFileChooserLauncher { intent -> attachmentChooser.launch(intent) }
+        runtime.setFileChooserLauncher { intent -> webFileChooser.launch(intent) }
         onDispose {
             runtime.setFileChooserLauncher(null)
             runtime.destroy()
         }
+    }
+
+    LaunchedEffect(viewModel.selectedProviderId, viewModel.selectedAccountId) {
+        pendingAttachmentCount = 0
+        pendingAttachmentNames = emptyList()
     }
 
     ModalNavigationDrawer(
@@ -197,33 +243,28 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     prompt = prompt,
                     onPromptChange = { prompt = it },
                     isGenerating = viewModel.isGenerating,
+                    attachmentCount = pendingAttachmentCount,
+                    attachmentNames = pendingAttachmentNames,
                     onAttach = {
-                        if (viewModel.isGenerating) return@ChatPane
-                        scope.launch {
-                            val provider = viewModel.selectedProvider
-                            val opened = runCatching {
-                                runtime.openAttachmentPicker(viewModel.session, provider)
-                            }.onFailure {
-                                DiagnosticLogger.e("FILE", "attachment_request_exception provider=${provider.id}", it)
-                            }.getOrDefault(false)
-
-                            if (!opened) {
-                                Toast.makeText(
-                                    context,
-                                    "${provider.name} 当前页面没有找到附件入口，已打开官网供你检查登录或附件功能。",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                                viewModel.openWeb()
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "选择文件或图片后会上传到 ${provider.name}，上传完成后再发送消息。",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                        val provider = viewModel.selectedProvider
+                        DiagnosticLogger.i(
+                            "FILE",
+                            "attachment_button_tapped provider=${provider.id} generating=${viewModel.isGenerating}"
+                        )
+                        if (viewModel.isGenerating) {
+                            Toast.makeText(context, "${provider.name} 正在生成，请等待或停止后再添加附件。", Toast.LENGTH_SHORT).show()
+                        } else {
+                            nativeAttachmentPicker.launch(arrayOf("*/*"))
                         }
                     },
-                    onSend = { val value = prompt; prompt = ""; viewModel.send(value, runtime) },
+                    onSend = {
+                        val value = prompt
+                        val attachments = pendingAttachmentCount
+                        prompt = ""
+                        viewModel.send(value, runtime, attachments)
+                        pendingAttachmentCount = 0
+                        pendingAttachmentNames = emptyList()
+                    },
                     onStop = { viewModel.stop(runtime) }
                 )
                 WebHost(runtime, viewModel, viewModel.showWeb)
@@ -247,6 +288,8 @@ private fun ChatPane(
     prompt: String,
     onPromptChange: (String) -> Unit,
     isGenerating: Boolean,
+    attachmentCount: Int,
+    attachmentNames: List<String>,
     onAttach: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit
@@ -265,26 +308,46 @@ private fun ChatPane(
             if (status != null) item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Surface(tonalElevation = 3.dp, shadowElevation = 6.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
-            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = onAttach, enabled = !isGenerating) {
-                    Icon(Icons.Outlined.AttachFile, "添加文件或图片")
-                }
-                TextField(
-                    value = prompt,
-                    onValueChange = onPromptChange,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("发送消息…") },
-                    minLines = 1,
-                    maxLines = 6,
-                    shape = RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                if (attachmentCount > 0) {
+                    Text(
+                        text = buildString {
+                            append("📎 已添加 $attachmentCount 个附件")
+                            if (attachmentNames.isNotEmpty()) {
+                                append(" · ")
+                                append(attachmentNames.take(2).joinToString(", "))
+                                if (attachmentNames.size > 2) append("…")
+                            }
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
-                )
-                Spacer(Modifier.size(8.dp))
-                FilledIconButton(onClick = if (isGenerating) onStop else onSend, enabled = isGenerating || prompt.isNotBlank()) {
-                    Icon(if (isGenerating) Icons.Default.Stop else Icons.Default.Send, if (isGenerating) "停止" else "发送")
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                    IconButton(onClick = onAttach) {
+                        Icon(Icons.Outlined.AttachFile, "添加文件或图片")
+                    }
+                    TextField(
+                        value = prompt,
+                        onValueChange = onPromptChange,
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("发送消息…") },
+                        minLines = 1,
+                        maxLines = 6,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+                        )
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    FilledIconButton(
+                        onClick = if (isGenerating) onStop else onSend,
+                        enabled = isGenerating || prompt.isNotBlank() || attachmentCount > 0
+                    ) {
+                        Icon(if (isGenerating) Icons.Default.Stop else Icons.Default.Send, if (isGenerating) "停止" else "发送")
+                    }
                 }
             }
         }
