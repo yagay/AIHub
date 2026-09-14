@@ -44,8 +44,6 @@
       selection.removeAllRanges();
       selection.addRange(range);
 
-      // Modern ProseMirror/Lexical editors often react to beforeinput rather
-      // than a direct textContent assignment.
       try {
         element.dispatchEvent(new InputEvent("beforeinput", {
           inputType: "deleteContentBackward", bubbles: true, cancelable: true, composed: true
@@ -110,13 +108,22 @@
         return "ok";
       }
 
-      // React/Angular sites often render/enable the send button only after
-      // their state sees the input event. Retry several times before Enter.
-      [120, 280, 520, 900].forEach((delay, index, delays) => {
+      // Some React/Angular pages render or enable the send button only after
+      // their state sees the input event. Only one delayed submission is ever
+      // allowed, otherwise repeated timers could duplicate a message.
+      let submitted = false;
+      const delays = [120, 280, 520, 900];
+      delays.forEach((delay, index) => {
         setTimeout(() => {
+          if (submitted) return;
           const delayed = firstUsable(cfg.sendSelectors);
-          if (delayed) delayed.click();
-          else if (index === delays.length - 1) pressEnter(editor);
+          if (delayed) {
+            submitted = true;
+            delayed.click();
+          } else if (index === delays.length - 1) {
+            submitted = true;
+            pressEnter(editor);
+          }
         }, delay);
       });
       return "ok";
