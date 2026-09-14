@@ -2,17 +2,22 @@ window.__AIHUB_CONFIG__ = {
   homeUrl: "https://chat.deepseek.com/",
   homePath: "/",
   verifySubmission: true,
-  ambiguousStopSelector: true,
+  responseStrategy: "last-turn",
+  generationStrategy: "quiet-last-turn",
+  generationQuietMs: 1800,
   inputSelectors: [
     "textarea[placeholder*='Message DeepSeek' i]",
+    "textarea[placeholder*='Message DSeek' i]",
     "textarea._27c9245",
     "textarea.ds-scroll-area",
+    "textarea[name='search']",
     "textarea",
     "#chat-input",
     "[contenteditable='true'][role='textbox']"
   ],
   loggedInSelectors: [
     "textarea[placeholder*='Message DeepSeek' i]",
+    "textarea[placeholder*='Message DSeek' i]",
     "textarea.ds-scroll-area",
     "div.ds-button--primary.ds-button--circle",
     "a[href*='/chat/']"
@@ -27,16 +32,24 @@ window.__AIHUB_CONFIG__ = {
     "div.ds-button--primary.ds-button--circle",
     "div[role='button'].ds-button--primary"
   ],
-  responseSelectors: [
-    "div[class*='message-content']",
-    "div[class*='markdown-body']",
-    "div.ds-markdown",
-    "div.ds-assistant-message-main-content div.ds-markdown",
-    "div.ds-assistant-message-main-content"
-  ],
   turnSelectors: [
     "div.ds-message",
     "[class*='ds-message']"
+  ],
+  assistantTurnSelectors: [],
+  responseSelectors: [
+    "div.ds-assistant-message-main-content",
+    "div.ds-assistant-message-main-content div.ds-markdown",
+    "div[class*='message-content']",
+    "div[class*='markdown-body']",
+    "div.ds-markdown"
+  ],
+  responseContentSelectors: [
+    "div.ds-assistant-message-main-content div.ds-markdown",
+    "div.ds-assistant-message-main-content",
+    "div.ds-markdown",
+    "div[class*='markdown-body']",
+    "div[class*='message-content']"
   ],
   assistantMarkerSelectors: [
     "div.ds-assistant-message-main-content",
