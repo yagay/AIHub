@@ -21,11 +21,21 @@ window.__AIHUB_CONFIG__ = {
     "div[role='button'].ds-button--primary:not(.ds-button--disabled)"
   ],
   responseSelectors: [
+    "div[class*='message-content']",
+    "div[class*='markdown-body']",
     "div.ds-markdown",
-    "div.markdown-body",
-    "div[class*='markdown']",
-    "div[class*='answer']",
-    "div[class*='message-content']"
+    "div.ds-assistant-message-main-content div.ds-markdown",
+    "div.ds-assistant-message-main-content"
+  ],
+  turnSelectors: [
+    "div.ds-message",
+    "[class*='ds-message']"
+  ],
+  assistantMarkerSelectors: [
+    "div.ds-assistant-message-main-content",
+    "div.ds-think-content",
+    "[class*='assistant-message']",
+    "[class*='think-content']"
   ],
   stopSelectors: [
     "div.ds-button--primary.ds-button--circle:not(.ds-button--disabled)"
