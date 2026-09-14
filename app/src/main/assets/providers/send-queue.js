@@ -15,7 +15,7 @@
       const sendState = window.__AIHUB_SEND_STATE__ || (window.__AIHUB_SEND_STATE__ = {});
       sendState.queuedAttachmentOnly = true;
       sendState.queueAcceptedAt = Date.now();
-      return "ok";
+      return "queued";
     }
     return result;
   };
