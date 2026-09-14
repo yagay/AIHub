@@ -59,7 +59,25 @@ class WebRuntime(private val context: Context) {
         ensureLoaded(session, provider)
         val result = call(session, provider, "send", JSONObject.quote(prompt))
         DiagnosticLogger.i("WEB", "adapter_send provider=${provider.id} promptChars=${prompt.length} result=${result ?: "null"}")
-        return result == "ok"
+
+        if (result == "ok") return true
+        if (result != "verify") return false
+
+        for (attempt in 0 until 12) {
+            delay(200)
+            val acknowledged = call(session, provider, "submissionAcknowledged") == "true"
+            if (acknowledged) {
+                DiagnosticLogger.i("WEB", "adapter_send_verified provider=${provider.id} attempts=${attempt + 1}")
+                return true
+            }
+        }
+
+        val probe = call(session, provider, "probeSummary").orEmpty()
+        DiagnosticLogger.w(
+            "WEB",
+            "send_verification_failed provider=${provider.id} probe=${DiagnosticLogger.scrub(probe).take(1400)}"
+        )
+        return false
     }
 
     suspend fun lastResponse(session: SessionKey, provider: ProviderSpec): String {
