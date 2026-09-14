@@ -1,5 +1,5 @@
 const BROKER = "ws://127.0.0.1:3847/bridge";
-const WORKER_MARKER = "AIHUB_BRIDGE_WORKER_V4";
+const WORKER_MARKER = "AIHUB_BRIDGE_WORKER_V5";
 const ports = new Map();
 let socket = null;
 let reconnectTimer = null;
@@ -71,9 +71,8 @@ function connectBroker() {
     let message;
     try { message = JSON.parse(event.data); } catch (_) { return; }
 
-    // LocalBroker historically emitted type:"ask" while the extension/content
-    // side expected type:"command". Accept both at the WebSocket boundary and
-    // normalize before forwarding to the provider content script.
+    // Keep compatibility with early AIHub builds, but normalize the provider-tab
+    // protocol to the canonical type:"command" before it leaves this worker.
     if (!message || !["ask", "command"].includes(message.type) || !message.id || !message.provider) return;
 
     const set = ports.get(message.provider);
@@ -120,6 +119,19 @@ chrome.runtime.onConnect.addListener((port) => {
       ports.get(provider).add(port);
       connectBroker();
       hello("provider-connected");
+      return;
+    }
+
+    if (message?.type === "progress" && message.id) {
+      connectBroker();
+      send({
+        type: "progress",
+        id: message.id,
+        stage: message.stage || "progress",
+        phase: message.phase || "",
+        textLength: Number(message.textLength || 0),
+        containerCount: Number(message.containerCount || 0),
+      });
       return;
     }
 
