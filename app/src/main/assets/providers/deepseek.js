@@ -1,5 +1,6 @@
 window.__AIHUB_CONFIG__ = {
   homeUrl: "https://chat.deepseek.com/",
+  verifySubmission: true,
   inputSelectors: [
     "textarea[placeholder*='Message DeepSeek' i]",
     "textarea._27c9245",
