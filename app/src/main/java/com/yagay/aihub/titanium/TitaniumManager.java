@@ -191,8 +191,8 @@ public final class TitaniumManager {
     private boolean purgeStaleExtensionProfileRegistration() throws Exception {
         if (extensionBuildId == null || extensionBuildId.isEmpty()) return false;
         String profiles = titaniumDataDir + "/app_chrome";
-        String extensionRootGlob = profiles + "/*/Extensions/" + extensionId;
-        String detect = "stale=; for root in " + q(extensionRootGlob)
+        String extensionRootPattern = q(profiles) + "/*/Extensions/" + extensionId;
+        String detect = "stale=; for root in " + extensionRootPattern
                 + "; do [ -d \"$root\" ] || continue; "
                 + "for v in \"$root\"/*; do [ -d \"$v\" ] || continue; "
                 + "actual=$(cat \"$v/" + BUILD_ID_FILE + "\" 2>/dev/null || true); "
@@ -201,7 +201,7 @@ public final class TitaniumManager {
         if (!"yes".equals(runSu(detect, 8).trim())) return false;
 
         String purge = "am force-stop " + PACKAGE + "; sleep 1; "
-                + "for root in " + q(extensionRootGlob)
+                + "for root in " + extensionRootPattern
                 + "; do [ -d \"$root\" ] && rm -rf \"$root\"; done; true";
         runSu(purge, 12);
         launched.clear();
