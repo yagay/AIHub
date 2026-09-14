@@ -128,8 +128,9 @@ public final class TitaniumManager {
                     + externalExtensionsDir);
         }
 
+        boolean staleProfileRegistration = purgeStaleExtensionProfileRegistration();
         ensureTitaniumExtensionRegistered();
-        if (extensionFilesChanged) {
+        if (extensionFilesChanged || staleProfileRegistration) {
             // Chromium may unpack an external-extension update while the old MV3
             // worker remains alive until the next browser process start. Restart
             // once more after the exact build appears in the profile so the newly
@@ -178,6 +179,33 @@ public final class TitaniumManager {
         throw new IllegalStateException(
                 "Root 与扩展文件均正常，但 Titanium 启动后仍未注册 AIHub Bridge。"
                         + "请打开 Titanium 的 chrome://extensions 检查扩展加载状态。");
+    }
+
+    /**
+     * Chromium can unpack a newer external CRX while Preferences still points at an
+     * older installed version. If any stale AIHub build is present, remove only this
+     * extension's profile directory while Titanium is stopped. On the next cold start
+     * the external-extension provider recreates the registration from the current CRX.
+     * Browser cookies, logins, history, tabs, and all other extensions are untouched.
+     */
+    private boolean purgeStaleExtensionProfileRegistration() throws Exception {
+        if (extensionBuildId == null || extensionBuildId.isEmpty()) return false;
+        String profiles = titaniumDataDir + "/app_chrome";
+        String extensionRootGlob = profiles + "/*/Extensions/" + extensionId;
+        String detect = "stale=; for root in " + q(extensionRootGlob)
+                + "; do [ -d \"$root\" ] || continue; "
+                + "for v in \"$root\"/*; do [ -d \"$v\" ] || continue; "
+                + "actual=$(cat \"$v/" + BUILD_ID_FILE + "\" 2>/dev/null || true); "
+                + "[ \"$actual\" = " + q(extensionBuildId) + " ] || stale=yes; done; done; "
+                + "[ -n \"$stale\" ] && echo yes || true";
+        if (!"yes".equals(runSu(detect, 8).trim())) return false;
+
+        String purge = "am force-stop " + PACKAGE + "; sleep 1; "
+                + "for root in " + q(extensionRootGlob)
+                + "; do [ -d \"$root\" ] && rm -rf \"$root\"; done; true";
+        runSu(purge, 12);
+        launched.clear();
+        return true;
     }
 
     private void restartTitaniumForExtensionActivation() throws Exception {
