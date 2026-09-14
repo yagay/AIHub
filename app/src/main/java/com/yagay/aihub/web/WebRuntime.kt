@@ -1,13 +1,16 @@
 package com.yagay.aihub.web
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -17,6 +20,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.yagay.aihub.diagnostics.DiagnosticLogger
@@ -330,6 +334,23 @@ class WebRuntime(private val context: Context) {
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
                 webChromeClient = object : WebChromeClient() {
+                    override fun onPermissionRequest(request: PermissionRequest) {
+                        val allowed = request.resources.filter { resource ->
+                            when (resource) {
+                                PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                                else -> false
+                            }
+                        }
+                        DiagnosticLogger.i(
+                            "WEB",
+                            "permission_request provider=${provider.id} requested=${request.resources.joinToString("|").take(240)} granted=${allowed.joinToString("|").take(240)}"
+                        )
+                        if (allowed.isNotEmpty()) request.grant(allowed.toTypedArray()) else request.deny()
+                    }
+
                     override fun onShowFileChooser(
                         webView: WebView,
                         filePathCallback: ValueCallback<Array<Uri>>,
