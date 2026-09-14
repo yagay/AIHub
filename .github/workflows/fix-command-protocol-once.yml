@@ -1,0 +1,73 @@
+name: One-shot canonical command protocol fix
+
+on:
+  push:
+    branches: ['refactor/titanium-extension']
+    paths: ['.github/workflows/fix-command-protocol-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/titanium-extension
+          fetch-depth: 0
+      - name: Canonicalize broker command protocol and diagnostics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          broker = Path('app/src/main/java/com/yagay/aihub/bridge/LocalBroker.java')
+          t = broker.read_text(encoding='utf-8')
+          old = '.put("type", "ask")'
+          new = '.put("type", "command")'
+          if old not in t:
+              raise SystemExit('broker ask marker missing')
+          t = t.replace(old, new, 1)
+
+          old = '''                    item.put("assignedCount", client.assigned.size());\n                    clientArray.put(item);'''
+          new = '''                    item.put("assignedCount", client.assigned.size());\n                    item.put("extensionVersion", client.extensionVersion);\n                    item.put("workerMarker", client.workerMarker);\n                    item.put("connectReason", client.connectReason);\n                    clientArray.put(item);'''
+          if old not in t:
+              raise SystemExit('broker diagnostic client marker missing')
+          t = t.replace(old, new, 1)
+
+          old = '''                synchronized (lock) {\n                    client.providers.clear();\n                    client.providers.addAll(providers);\n                }'''
+          new = '''                synchronized (lock) {\n                    client.providers.clear();\n                    client.providers.addAll(providers);\n                    client.extensionVersion = message.optString("version", client.extensionVersion);\n                    client.workerMarker = message.optString("worker", client.workerMarker);\n                    client.connectReason = message.optString("reason", client.connectReason);\n                }'''
+          if old not in t:
+              raise SystemExit('broker hello marker missing')
+          t = t.replace(old, new, 1)
+
+          old = '''        volatile boolean open = true;\n\n        WsClient(Socket socket, InputStream in, OutputStream out) {'''
+          new = '''        volatile boolean open = true;\n        volatile String extensionVersion = "";\n        volatile String workerMarker = "";\n        volatile String connectReason = "";\n\n        WsClient(Socket socket, InputStream in, OutputStream out) {'''
+          if old not in t:
+              raise SystemExit('broker WsClient marker missing')
+          t = t.replace(old, new, 1)
+          broker.write_text(t, encoding='utf-8')
+
+          diag = Path('app/src/main/java/com/yagay/aihub/diagnostics/DiagnosticsExporter.java')
+          d = diag.read_text(encoding='utf-8')
+          old = "grep -q 'AIHUB_BRIDGE_WORKER_V3' \\\"$w\\\" 2>/dev/null && echo worker_marker=AIHUB_BRIDGE_WORKER_V3 || echo worker_marker=old_or_missing;"
+          new = "marker=$(grep -o -m1 'AIHUB_BRIDGE_WORKER_V[0-9][0-9]*' \\\"$w\\\" 2>/dev/null || true); [ -n \\\"$marker\\\" ] && echo worker_marker=\\\"$marker\\\" || echo worker_marker=old_or_missing;"
+          if old not in d:
+              raise SystemExit('diagnostic V3 marker missing')
+          d = d.replace(old, new, 1)
+          diag.write_text(d, encoding='utf-8')
+          PY
+      - name: Verify patch
+        run: |
+          grep -q '\.put("type", "command")' app/src/main/java/com/yagay/aihub/bridge/LocalBroker.java
+          ! grep -q '\.put("type", "ask")' app/src/main/java/com/yagay/aihub/bridge/LocalBroker.java
+          grep -q 'workerMarker' app/src/main/java/com/yagay/aihub/bridge/LocalBroker.java
+          grep -q 'AIHUB_BRIDGE_WORKER_V\[0-9\]' app/src/main/java/com/yagay/aihub/diagnostics/DiagnosticsExporter.java
+          git diff --check
+      - name: Commit source fix
+        run: |
+          git config user.name 'AIHub CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/com/yagay/aihub/bridge/LocalBroker.java app/src/main/java/com/yagay/aihub/diagnostics/DiagnosticsExporter.java
+          git commit -m 'Canonicalize bridge command protocol at broker'
+          git push origin HEAD:refactor/titanium-extension
