@@ -102,28 +102,33 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             isGenerating = true
             status = "正在连接 ${provider.name}…"
-            val loggedIn = runCatching { runtime.isLoggedIn(currentSession, provider) }
+
+            // Login detection is only a preflight hint. AI websites frequently
+            // change or lazy-render their composer, so a false preflight must
+            // not block an otherwise valid session.
+            val loggedInHint = runCatching { runtime.isLoggedIn(currentSession, provider) }
                 .onFailure { DiagnosticLogger.e("CHAT", "login_check_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
-            if (!loggedIn) {
-                DiagnosticLogger.w("CHAT", "send_blocked provider=${provider.id} reason=not_logged_in")
-                isGenerating = false
-                showWeb = true
-                status = "请先在网页中登录 ${provider.name}，登录后返回聊天页再次发送。"
-                return@launch
+            if (!loggedInHint) {
+                DiagnosticLogger.w("CHAT", "login_preflight_false provider=${provider.id} action=try_send_anyway")
             }
+
             val sent = runCatching { runtime.send(currentSession, provider, text) }
                 .onFailure { DiagnosticLogger.e("CHAT", "send_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
             if (!sent) {
-                DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom")
+                DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint")
                 isGenerating = false
                 showWeb = true
-                status = "网页结构可能已经变化，未找到输入框或发送按钮。"
+                status = if (!loggedInHint) {
+                    "没有找到 ${provider.name} 的聊天输入框。请在网页中确认已登录，然后返回重试。"
+                } else {
+                    "网页结构可能已经变化，未找到输入框或发送按钮。"
+                }
                 return@launch
             }
 
-            DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id}")
+            DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint")
             status = "等待 ${provider.name} 回复…"
             var last = ""
             var stableCount = 0
@@ -133,6 +138,14 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll type=${it.javaClass.simpleName}") }
                     .getOrDefault("")
                 val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
+
+                if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
+                    DiagnosticLogger.d(
+                        "CHAT",
+                        "response_poll provider=${provider.id} poll=$poll responseChars=${response.length} generating=$generating"
+                    )
+                }
+
                 if (response.isNotBlank()) {
                     if (response == last) stableCount++ else stableCount = 0
                     last = response
