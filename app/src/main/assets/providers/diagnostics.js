@@ -20,7 +20,7 @@
     return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) !== 0;
   };
 
-  const usable = (node) => !!node && visible(node) && !node.disabled && node.getAttribute?.("aria-disabled") !== "true";
+  const usable = (node) => !!node && visible(node) && !node.disabled && node.getAttribute?.("aria-disabled") !== "true" && !node.classList?.contains("ds-button--disabled");
   const textLen = (node) => {
     if (!node) return 0;
     if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) return String(node.value || "").length;
@@ -138,9 +138,12 @@
 
   api.diagnosticSnapshot = (phase) => {
     installObserver(); installErrors();
-    const inputs = all(cfg.inputSelectors), sends = all(cfg.sendSelectors), stops = all(cfg.stopSelectors), responses = all(cfg.responseSelectors), turns = all(cfg.turnSelectors);
+    const inputs = all(cfg.inputSelectors);
+    const sendCandidates = all(cfg.sendProbeSelectors || cfg.sendSelectors);
+    const usableSends = all(cfg.sendSelectors);
+    const stops = all(cfg.stopSelectors), responses = all(cfg.responseSelectors), turns = all(cfg.turnSelectors);
     return {
-      schema: 3, phase: safe(phase, 80), at: Date.now(),
+      schema: 4, phase: safe(phase, 80), at: Date.now(),
       page: {
         origin: location.origin, path: location.pathname, readyState: document.readyState, visibility: document.visibilityState,
         hasFocus: document.hasFocus?.() || false, online: navigator.onLine, titleChars: String(document.title || "").length,
@@ -151,18 +154,24 @@
       viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio, scrollY: Math.round(scrollY || 0) },
       activeElement: summary(document.activeElement),
       groups: {
-        inputs: group(cfg.inputSelectors), send: group(cfg.sendSelectors), stop: group(cfg.stopSelectors), responses: group(cfg.responseSelectors),
+        inputs: group(cfg.inputSelectors),
+        sendCandidate: group(cfg.sendProbeSelectors || cfg.sendSelectors),
+        sendUsable: group(cfg.sendSelectors),
+        stop: group(cfg.stopSelectors), responses: group(cfg.responseSelectors),
         turns: group(cfg.turnSelectors), assistants: group(cfg.assistantMarkerSelectors), newChat: group(cfg.newChatSelectors),
         attachments: group(cfg.attachmentButtonSelectors), model: group(cfg.modelSelectors), search: group(cfg.searchSelectors),
         reasoning: group(cfg.reasoningSelectors), tools: group(cfg.toolsSelectors)
       },
       primary: {
         input: summary(inputs.find(visible) || inputs[0]), inputAncestors: ancestors(inputs.find(visible) || inputs[0], 4),
-        send: summary(sends.find(visible) || sends[0]), sendAncestors: ancestors(sends.find(visible) || sends[0], 4),
+        sendCandidate: summary(sendCandidates.find(visible) || sendCandidates[0]),
+        sendUsable: summary(usableSends.find(usable) || usableSends.find(visible) || usableSends[0]),
+        sendCandidateAncestors: ancestors(sendCandidates.find(visible) || sendCandidates[0], 4),
         stop: summary(stops.find(visible) || stops[0]), response: summary(responses.slice(-1)[0]),
         responseAncestors: ancestors(responses.slice(-1)[0], 3), turn: summary(turns.slice(-1)[0])
       },
       fileInputs: fileInputs(), interactive: interactives(), messages: messageStructures(),
+      attachment: typeof api.attachmentProbe === "function" ? api.attachmentProbe() : null,
       submission: typeof api.submissionStatus === "function" ? api.submissionStatus() : null,
       mutations: {
         total: state.mutations.total, added: state.mutations.added, removed: state.mutations.removed, attributes: state.mutations.attributes,
