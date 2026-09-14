@@ -192,6 +192,12 @@
 
     let attached = assignWithDataTransfer(input, files);
     if (attached <= 0) attached = assignWithInstanceOverride(input, files);
+    if (attached > 0) {
+      state.lastAttachedCount = attached;
+      state.lastAttachedAt = Date.now();
+      state.lastInputAccept = input.accept || "";
+      state.lastInputMultiple = !!input.multiple;
+    }
     return `attached:${attached}`;
   };
 
@@ -220,6 +226,10 @@
       visibleUploadMenuItem: !!findUploadMenuItem(),
       bridgeAvailable: !!window.AIHubNativeFiles,
       stagedCount: window.AIHubNativeFiles?.count?.() || 0,
+      lastAttachedCount: Number(state.lastAttachedCount || 0),
+      lastAttachedAgeMs: state.lastAttachedAt ? Math.max(0, Date.now() - state.lastAttachedAt) : -1,
+      lastInputAccept: state.lastInputAccept || "",
+      lastInputMultiple: !!state.lastInputMultiple,
       lastStrategy: state.lastStrategy || "",
       lastPrepare: state.lastPrepare || "",
       path: location.pathname
