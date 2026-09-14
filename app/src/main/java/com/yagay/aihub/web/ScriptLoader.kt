@@ -15,6 +15,8 @@ class ScriptLoader(private val context: Context) {
         append(load("providers/capabilities.js"))
         append('\n')
         append(load("providers/diagnostics.js"))
+        append('\n')
+        append(load("providers/diagnostic-hooks.js"))
     }
 
     private fun load(path: String): String = cache.getOrPut(path) {
