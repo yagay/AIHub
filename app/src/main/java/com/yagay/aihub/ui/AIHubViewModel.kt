@@ -13,8 +13,10 @@ import androidx.lifecycle.viewModelScope
 import com.yagay.aihub.data.AccountStore
 import com.yagay.aihub.data.ConversationBindingStore
 import com.yagay.aihub.data.ConversationStore
+import com.yagay.aihub.data.PendingAttachmentStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.AccountProfile
+import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.model.ProviderSpec
@@ -29,6 +31,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     private val accountStore = AccountStore(application)
     private val conversationStore = ConversationStore(application)
     private val bindingStore = ConversationBindingStore(application)
+    private val pendingAttachmentStore = PendingAttachmentStore(application)
 
     val providers = ProviderCatalog.all
     var accounts by mutableStateOf(accountStore.loadAll())
@@ -98,6 +101,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         messages.clear()
         unreadSessions[session.storageKey] = false
         bindingStore.clear(session)
+        pendingAttachmentStore.clear(session)
         showWeb = true
         DiagnosticLogger.i("VM", "account_added provider=$selectedProviderId account=${safeAccountId(account.id)}")
         setStatus(session, "请登录 ${selectedProvider.name} 的新账号")
@@ -120,16 +124,32 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         val provider = selectedProvider
         if ((text.isBlank() && attachmentCount <= 0) || isSessionGenerating(currentSession)) return
 
+        val storedAttachments = if (attachmentCount > 0) {
+            pendingAttachmentStore.consume(currentSession).take(attachmentCount)
+        } else {
+            emptyList()
+        }
+        val attachments = if (storedAttachments.isNotEmpty()) {
+            storedAttachments
+        } else {
+            List(attachmentCount) { index -> AttachmentMeta(name = "附件 ${index + 1}") }
+        }
+
         DiagnosticLogger.i(
             "CHAT",
-            "send_started provider=${provider.id} account=${safeAccountId(currentSession.accountId)} promptChars=${text.length} attachments=$attachmentCount"
+            "send_started provider=${provider.id} account=${safeAccountId(currentSession.accountId)} promptChars=${text.length} attachments=$attachmentCount metadata=${attachments.size}"
         )
+        val attachmentLabel = attachments.joinToString(", ") { it.name }.take(240)
         val visibleUserText = when {
-            attachmentCount > 0 && text.isBlank() -> "📎 $attachmentCount 个附件"
-            attachmentCount > 0 -> "$text\n\n📎 $attachmentCount 个附件"
+            attachments.isNotEmpty() && text.isBlank() -> "📎 $attachmentLabel"
+            attachments.isNotEmpty() -> "$text\n\n📎 $attachmentLabel"
             else -> text
         }
-        messages += ChatMessage(role = MessageRole.USER, text = visibleUserText)
+        messages += ChatMessage(
+            role = MessageRole.USER,
+            text = visibleUserText,
+            attachments = attachments
+        )
         conversationStore.save(currentSession, messages.toList())
         unreadSessions[currentSession.storageKey] = false
 
@@ -240,6 +260,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             if (action == "deleteConversation") {
                 conversationStore.clear(currentSession)
                 bindingStore.clear(currentSession)
+                pendingAttachmentStore.clear(currentSession)
                 unreadSessions[currentSession.storageKey] = false
                 if (isCurrentSession(currentSession)) messages.clear()
             }
@@ -276,6 +297,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         messages.clear()
         conversationStore.clear(current)
         bindingStore.clear(current)
+        pendingAttachmentStore.clear(current)
         unreadSessions[current.storageKey] = false
         viewModelScope.launch {
             runtime.newChat(current, provider)
@@ -310,7 +332,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             .getOrDefault(WebRuntime.ResponseSnapshot())
         DiagnosticLogger.d(
             "CHAT",
-            "response_baseline provider=${provider.id} chars=${baseline.text.length} key=${baseline.key.takeLast(40)} responses=${baseline.responseCount} turns=${baseline.turnCount} path=${baseline.path}"
+            "response_baseline provider=${provider.id} chars=${baseline.text.length} key=${baseline.key} responses=${baseline.responseCount} turns=${baseline.turnCount} pathHash=${baseline.path}"
         )
         return baseline
     }
@@ -348,20 +370,21 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 idlePolls++
             }
 
-            val structuralChange = snap.key.isNotBlank() && snap.key != baseline.key ||
+            val structuralChange = (snap.key.isNotBlank() && snap.key != baseline.key) ||
                 snap.responseCount > baseline.responseCount ||
                 snap.turnCount > baseline.turnCount ||
                 (baseline.path.isNotBlank() && snap.path.isNotBlank() && snap.path != baseline.path)
             val textChange = snap.text.isNotBlank() && snap.text != baseline.text
             val sameTextGenerationAction = replaceLastAssistant &&
                 snap.text.isNotBlank() && sawGenerating && !generating && idlePolls >= 2
-            val freshResponse = snap.text.isNotBlank() && (structuralChange || textChange || sameTextGenerationAction)
+            val freshResponse = snap.text.isNotBlank() &&
+                (structuralChange || textChange || sameTextGenerationAction)
 
             if (!freshResponse && snap.text.isNotBlank() && !staleLogged) {
                 staleLogged = true
                 DiagnosticLogger.d(
                     "CHAT",
-                    "stale_response_ignored provider=${provider.id} poll=$poll source=$source chars=${snap.text.length} key=${snap.key.takeLast(40)} baselineChars=${baseline.text.length} baselineKey=${baseline.key.takeLast(40)}"
+                    "stale_response_ignored provider=${provider.id} poll=$poll source=$source chars=${snap.text.length} key=${snap.key} baselineChars=${baseline.text.length} baselineKey=${baseline.key}"
                 )
             }
 
@@ -402,7 +425,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     setStatus(currentSession, null)
                     DiagnosticLogger.i(
                         "CHAT",
-                        "response_completed provider=${provider.id} source=$source responseChars=${snap.text.length} key=${snap.key.takeLast(40)} polls=${poll + 1} background=${!isCurrentSession(currentSession)}"
+                        "response_completed provider=${provider.id} source=$source responseChars=${snap.text.length} key=${snap.key} polls=${poll + 1} background=${!isCurrentSession(currentSession)}"
                     )
                     return
                 }
@@ -430,7 +453,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         setStatus(currentSession, if (last.text.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null)
         DiagnosticLogger.w(
             "CHAT",
-            "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.text.length} lastKey=${last.key.takeLast(40)} baselineChars=${baseline.text.length}"
+            "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.text.length} lastKey=${last.key} baselineChars=${baseline.text.length}"
         )
     }
 
@@ -465,7 +488,8 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun setGenerating(target: SessionKey, value: Boolean) {
-        if (value) generatingSessions[target.storageKey] = true else generatingSessions.remove(target.storageKey)
+        if (value) generatingSessions[target.storageKey] = true
+        else generatingSessions.remove(target.storageKey)
     }
 
     private fun isSessionGenerating(target: SessionKey): Boolean =
