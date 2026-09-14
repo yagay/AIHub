@@ -6,12 +6,18 @@ import android.provider.OpenableColumns
 import android.util.Base64
 import android.webkit.JavascriptInterface
 import com.yagay.aihub.diagnostics.DiagnosticLogger
+import com.yagay.aihub.model.AttachmentMeta
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
 
 class NativeAttachmentBridge(private val context: Context) {
-    data class Summary(val names: List<String>, val totalBytes: Long)
+    data class Summary(
+        val attachments: List<AttachmentMeta>,
+        val totalBytes: Long
+    ) {
+        val names: List<String> get() = attachments.map { it.name }
+    }
 
     private data class StagedFile(
         val file: File,
@@ -45,7 +51,16 @@ class NativeAttachmentBridge(private val context: Context) {
 
         stagingDir = dir
         staged = files
-        Summary(files.map { it.displayName }, files.sumOf { it.size })
+        Summary(
+            attachments = files.map { item ->
+                AttachmentMeta(
+                    name = item.displayName,
+                    mimeType = item.mimeType,
+                    sizeBytes = item.size
+                )
+            },
+            totalBytes = files.sumOf { it.size }
+        )
     }
 
     fun clearNative() = synchronized(lock) { clearLocked() }
@@ -100,7 +115,13 @@ class NativeAttachmentBridge(private val context: Context) {
         var name = ""
         var size: Long? = null
         runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
