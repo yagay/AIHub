@@ -3,11 +3,17 @@
   if (!api || typeof api.diagnosticSnapshot !== "function") return;
   const bridge = window.AIHubNativeFiles;
   const state = window.__AIHUB_DIAG_HOOK_STATE__ || (window.__AIHUB_DIAG_HOOK_STATE__ = {
+    apiRef: null,
     wrapped: {},
     lastPageKey: "",
     ackPolls: 0,
     lastAck: false
   });
+
+  if (state.apiRef !== api) {
+    state.apiRef = api;
+    state.wrapped = {};
+  }
 
   const scope = () => {
     try { return `web:${location.hostname || "unknown"}`; } catch (_) { return "web:unknown"; }
@@ -19,9 +25,7 @@
       const payload = JSON.stringify(api.diagnosticSnapshot(phase));
       bridge.diagnosticSnapshot(scope(), phase, payload);
     } catch (error) {
-      try {
-        bridge?.diagnosticEvent?.(scope(), "snapshot-error", String(error));
-      } catch (_) {}
+      try { bridge?.diagnosticEvent?.(scope(), "snapshot-error", String(error)); } catch (_) {}
     }
   };
 
@@ -32,6 +36,10 @@
     const original = api[name];
     state.wrapped[name] = true;
     api[name] = function(...args) {
+      if (name === "send") {
+        state.ackPolls = 0;
+        state.lastAck = false;
+      }
       emit(`${name}:before`);
       let result;
       try {
@@ -48,15 +56,8 @@
   };
 
   [
-    "send",
-    "attachStagedFiles",
-    "prepareAttachmentInput",
-    "openAttachmentPicker",
-    "performAction",
-    "openOptionPicker",
-    "selectOption",
-    "stop",
-    "newChat"
+    "send", "attachStagedFiles", "prepareAttachmentInput", "openAttachmentPicker",
+    "performAction", "openOptionPicker", "selectOption", "stop", "newChat"
   ].forEach((name) => wrap(name));
 
   if (!state.wrapped.submissionAcknowledged && typeof api.submissionAcknowledged === "function") {
