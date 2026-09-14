@@ -23,6 +23,7 @@ import android.widget.FrameLayout
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.yagay.aihub.data.ConversationBindingStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ProviderSpec
 import com.yagay.aihub.model.SessionKey
@@ -53,10 +54,12 @@ class WebRuntime(private val context: Context) {
         val path: String = "",
         val quietMs: Long = -1L
     ) {
-        val isGenerating: Boolean get() = state == "generating" || state == "queued" || state == "uploading"
+        val isGenerating: Boolean
+            get() = state == "generating" || state == "queued" || state == "uploading"
     }
 
     private val loader = ScriptLoader(context)
+    private val bindingStore = ConversationBindingStore(context.applicationContext)
     private val webViews = linkedMapOf<String, WebView>()
     private val attachmentBridges = linkedMapOf<String, NativeAttachmentBridge>()
     private val restoredKeys = mutableSetOf<String>()
@@ -112,8 +115,9 @@ class WebRuntime(private val context: Context) {
         preferredUrl: String? = null
     ) {
         val key = webViewKey(session, provider)
-        val validPreferred = sameOriginUrl(preferredUrl, provider.homeUrl)
-        if (validPreferred != null) preferredUrls[key] = validPreferred
+        val restored = sameOriginUrl(preferredUrl, provider.homeUrl)
+            ?: sameOriginUrl(bindingStore.loadUrl(session), provider.homeUrl)
+        if (restored != null) preferredUrls[key] = restored
 
         val webView = obtain(session, provider)
         (webView.parent as? ViewGroup)?.removeView(webView)
@@ -355,6 +359,8 @@ class WebRuntime(private val context: Context) {
     }
 
     suspend fun newChat(session: SessionKey, provider: ProviderSpec) {
+        bindingStore.clear(session)
+        preferredUrls.remove(webViewKey(session, provider))
         ensureLoaded(session, provider)
         val result = call(session, provider, "newChat")
         DiagnosticLogger.i("WEB", "adapter_new_chat provider=${provider.id} result=${result ?: "null"}")
@@ -495,21 +501,16 @@ class WebRuntime(private val context: Context) {
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                        DiagnosticLogger.i(
-                            "WEB",
-                            "page_started provider=${provider.id} url=${safeUrl(url)}"
-                        )
+                        DiagnosticLogger.i("WEB", "page_started provider=${provider.id} url=${safeUrl(url)}")
                         super.onPageStarted(view, url, favicon)
                     }
 
                     override fun onPageFinished(view: WebView, url: String?) {
-                        DiagnosticLogger.i(
-                            "WEB",
-                            "page_finished provider=${provider.id} url=${safeUrl(url)}"
-                        )
+                        DiagnosticLogger.i("WEB", "page_finished provider=${provider.id} url=${safeUrl(url)}")
                         val sameOrigin = sameOriginUrl(url, provider.homeUrl)
                         if (sameOrigin != null) {
                             preferredUrls[key] = sameOrigin
+                            bindingStore.saveUrl(session, sameOrigin)
                             pageChangeListener?.invoke(session, provider, sameOrigin)
                         }
                         super.onPageFinished(view, url)
@@ -573,6 +574,8 @@ class WebRuntime(private val context: Context) {
         val key = webViewKey(session, provider)
         val webView = obtain(session, provider)
         if (webView.url.isNullOrBlank()) {
+            val restored = sameOriginUrl(bindingStore.loadUrl(session), provider.homeUrl)
+            if (restored != null) preferredUrls[key] = restored
             webView.loadUrl(preferredUrls[key] ?: provider.homeUrl)
         }
         repeat(40) {
@@ -667,7 +670,7 @@ class WebRuntime(private val context: Context) {
             turnCount = obj.optInt("turnCount", 0),
             state = obj.optString("state", "idle"),
             reason = obj.optString("reason"),
-            path = obj.optString("path"),
+            path = obj.optString("pathHash"),
             quietMs = obj.optLong("quietMs", -1L)
         )
     }
