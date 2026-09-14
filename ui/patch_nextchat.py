@@ -19,10 +19,47 @@ edit("app/store/access.ts", [
     ('needCode: true,', 'needCode: false,'),
     ('hideUserApiKey: false,', 'hideUserApiKey: true,'),
 ])
+
+# Existing AIHub installs already have NextChat access settings persisted in
+# WebView localStorage. Defaults alone do not override those values. Bump the
+# persisted store version and migrate only transport-related fields so chat
+# history and unrelated UI preferences remain untouched.
+edit("app/store/access.ts", [
+    ('    version: 2,', '    version: 3,'),
+    ('      return persistedState as any;\n    },',
+     '      if (version < 3) {\n'
+     '        const state = persistedState as any;\n'
+     '        state.useCustomConfig = true;\n'
+     '        state.openaiUrl = "http://127.0.0.1:3847";\n'
+     '        state.openaiApiKey = "";\n'
+     '        state.provider = ServiceProvider.OpenAI;\n'
+     '        state.needCode = false;\n'
+     '        state.hideUserApiKey = true;\n'
+     '      }\n\n'
+     '      return persistedState as any;\n'
+     '    },'),
+])
+
 edit("app/store/config.ts", [
     ('model: "gpt-4o-mini" as ModelType,', 'model: "chatgpt-web" as ModelType,'),
     ('enableAutoGenerateTitle: true,', 'enableAutoGenerateTitle: false,'),
 ])
+
+# Migrate the persisted global model selection as well. Individual old chats can
+# still contain legacy gpt-* model names; LocalBroker handles those as a safe
+# ChatGPT-Web compatibility fallback.
+edit("app/store/config.ts", [
+    ('    version: 4.1,', '    version: 4.2,'),
+    ('      return state as any;\n    },',
+     '      if (version < 4.2) {\n'
+     '        state.modelConfig.model = "chatgpt-web" as ModelType;\n'
+     '        state.modelConfig.providerName = "OpenAI" as ServiceProvider;\n'
+     '        state.enableAutoGenerateTitle = false;\n'
+     '      }\n\n'
+     '      return state as any;\n'
+     '    },'),
+])
+
 edit("app/client/platforms/openai.ts", [
     ('  private disableListModels = true;', '  private disableListModels = false;'),
     ('    const chatModels = resJson.data?.filter(\n      (m) => m.id.startsWith("gpt-") || m.id.startsWith("chatgpt-"),\n    );', '    const chatModels = resJson.data;'),
