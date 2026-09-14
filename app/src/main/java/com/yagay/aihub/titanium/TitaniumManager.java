@@ -104,7 +104,8 @@ public final class TitaniumManager {
         String installedFilesOk = runSu("[ -s " + q(installedCrx) + " ] && [ -s " + q(installedJson)
                 + " ] && echo yes || true", 5).trim();
 
-        if (!expectedBuild.equals(installedBuild) || !"yes".equals(installedFilesOk)) {
+        boolean extensionFilesChanged = !expectedBuild.equals(installedBuild) || !"yes".equals(installedFilesOk);
+        if (extensionFilesChanged) {
             String install = "mkdir -p " + q(externalExtensionsDir)
                     + " && cp " + q(sourceCrx.getAbsolutePath()) + " " + q(installedCrx)
                     + " && cp " + q(sourceJson.getAbsolutePath()) + " " + q(installedJson)
@@ -128,6 +129,13 @@ public final class TitaniumManager {
         }
 
         ensureTitaniumExtensionRegistered();
+        if (extensionFilesChanged) {
+            // Chromium may unpack an external-extension update while the old MV3
+            // worker remains alive until the next browser process start. Restart
+            // once more after the exact build appears in the profile so the newly
+            // installed service worker/content script become the active runtime.
+            restartTitaniumForExtensionActivation();
+        }
         prepared = true;
     }
 
@@ -170,6 +178,27 @@ public final class TitaniumManager {
         throw new IllegalStateException(
                 "Root 与扩展文件均正常，但 Titanium 启动后仍未注册 AIHub Bridge。"
                         + "请打开 Titanium 的 chrome://extensions 检查扩展加载状态。");
+    }
+
+    private void restartTitaniumForExtensionActivation() throws Exception {
+        int uidDerivedUser = android.os.Process.myUid() / 100000;
+        String currentUser = runSu("cmd activity get-current-user 2>/dev/null || am get-current-user 2>/dev/null || echo "
+                + uidDerivedUser, 5).trim();
+        if (currentUser.isEmpty() || !currentUser.matches("\\d+")) {
+            currentUser = String.valueOf(uidDerivedUser);
+        }
+
+        String restart = "am force-stop " + PACKAGE
+                + "; sleep 1; monkey --user " + currentUser + " -p " + PACKAGE
+                + " -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1"
+                + " || am start --user " + currentUser
+                + " -a android.intent.action.VIEW -d 'https://chatgpt.com/' -p " + PACKAGE
+                + " >/dev/null 2>&1 || true";
+        runSu(restart, 12);
+        Thread.sleep(1500);
+        runSu("am start --activity-reorder-to-front -n com.yagay.aihub/com.yagay.aihub.app.MainActivity"
+                + " >/dev/null 2>&1 || true", 5);
+        launched.clear();
     }
 
     private boolean isExtensionRegistered() throws Exception {

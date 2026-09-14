@@ -72,6 +72,10 @@ public final class LocalBroker implements Closeable {
     private long totalAssignments;
     private long totalResults;
     private long totalErrors;
+    private long totalProgressEvents;
+    private long lastProgressTextLength;
+    private int lastProgressContainerCount;
+    private String lastProgressPhase = "";
     private String lastModel = "";
     private String lastProvider = "";
     private String lastStage = "startup";
@@ -114,6 +118,10 @@ public final class LocalBroker implements Closeable {
                 root.put("totalAssignments", totalAssignments);
                 root.put("totalResults", totalResults);
                 root.put("totalErrors", totalErrors);
+                root.put("totalProgressEvents", totalProgressEvents);
+                root.put("lastProgressPhase", lastProgressPhase);
+                root.put("lastProgressTextLength", lastProgressTextLength);
+                root.put("lastProgressContainerCount", lastProgressContainerCount);
                 root.put("lastModel", lastModel);
                 root.put("lastProvider", lastProvider);
                 root.put("lastStage", lastStage);
@@ -413,6 +421,22 @@ public final class LocalBroker implements Closeable {
                     client.connectReason = message.optString("reason", client.connectReason);
                 }
                 dispatchQueued();
+                return;
+            }
+
+            if ("progress".equals(type)) {
+                String id = message.optString("id", "");
+                synchronized (lock) {
+                    if (pending.containsKey(id)) {
+                        totalProgressEvents++;
+                        String stage = message.optString("stage", "progress");
+                        lastStage = stage.isEmpty() ? "progress" : stage;
+                        lastProgressPhase = message.optString("phase", "");
+                        lastProgressTextLength = Math.max(0L, message.optLong("textLength", 0L));
+                        lastProgressContainerCount = Math.max(0, message.optInt("containerCount", 0));
+                        lastError = "";
+                    }
+                }
                 return;
             }
 
