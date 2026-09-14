@@ -16,6 +16,7 @@ import com.yagay.aihub.model.AccountProfile
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.ProviderSpec
 import com.yagay.aihub.provider.ProviderCatalog
 import com.yagay.aihub.web.WebRuntime
 import kotlinx.coroutines.delay
@@ -118,11 +119,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 DiagnosticLogger.w("CHAT", "login_preflight_false provider=${provider.id} action=try_send_anyway")
             }
 
-            val baselineResponse = runCatching { runtime.lastResponse(currentSession, provider) }
-                .onFailure { DiagnosticLogger.w("CHAT", "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}") }
-                .getOrDefault("")
-            DiagnosticLogger.d("CHAT", "response_baseline provider=${provider.id} chars=${baselineResponse.length}")
-
+            val baselineResponse = responseBaseline(runtime, currentSession, provider)
             val sent = runCatching { runtime.send(currentSession, provider, text) }
                 .onFailure { DiagnosticLogger.e("CHAT", "send_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
@@ -140,100 +137,55 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
             DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint attachments=$attachmentCount")
             status = "等待 ${provider.name} 回复…"
-            var last = ""
-            var stableCount = 0
-            var sawGenerating = false
-            var idleAfterGenerating = 0
-            var staleLogged = false
-
-            for (poll in 0 until 180) {
-                delay(700)
-                val response = runCatching { runtime.lastResponse(currentSession, provider) }
-                    .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll type=${it.javaClass.simpleName}") }
-                    .getOrDefault("")
-                val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
-                val changedFromBaseline = response.isNotBlank() && response != baselineResponse
-
-                if (generating) {
-                    sawGenerating = true
-                    idleAfterGenerating = 0
-                } else if (sawGenerating && !changedFromBaseline) {
-                    idleAfterGenerating++
-                } else {
-                    idleAfterGenerating = 0
-                }
-
-                val identicalAfterGeneration = response.isNotBlank() &&
-                    response == baselineResponse &&
-                    sawGenerating &&
-                    !generating &&
-                    idleAfterGenerating >= 3
-                val freshResponse = changedFromBaseline || identicalAfterGeneration
-
-                if (!freshResponse && response.isNotBlank() && !staleLogged) {
-                    staleLogged = true
-                    DiagnosticLogger.d(
-                        "CHAT",
-                        "stale_response_ignored provider=${provider.id} poll=$poll chars=${response.length} baselineChars=${baselineResponse.length}"
-                    )
-                }
-
-                if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
-                    DiagnosticLogger.d(
-                        "CHAT",
-                        "response_poll provider=${provider.id} poll=$poll responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse}"
-                    )
-                    if (response.isBlank() || !freshResponse) {
-                        val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
-                        if (probe.isNotBlank()) {
-                            DiagnosticLogger.d(
-                                "CHAT",
-                                "dom_probe provider=${provider.id} poll=$poll summary=${DiagnosticLogger.scrub(probe).take(1400)}"
-                            )
-                        }
-                    }
-                }
-
-                if (freshResponse) {
-                    if (response == last) stableCount++ else stableCount = 0
-                    last = response
-                    if (!generating && stableCount >= 2) {
-                        messages += ChatMessage(role = MessageRole.ASSISTANT, text = response)
-                        persist(currentSession)
-                        isGenerating = false
-                        status = null
-                        DiagnosticLogger.i(
-                            "CHAT",
-                            "response_completed provider=${provider.id} responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length}"
-                        )
-                        return@launch
-                    }
-                } else {
-                    stableCount = 0
-                }
-
-                if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank() && response.isBlank()) {
-                    val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
-                    DiagnosticLogger.w(
-                        "CHAT",
-                        "response_extract_failed provider=${provider.id} poll=$poll probe=${DiagnosticLogger.scrub(probe).take(1400)}"
-                    )
-                    isGenerating = false
-                    status = "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。"
-                    return@launch
-                }
-            }
-
-            if (last.isNotBlank()) {
-                messages += ChatMessage(role = MessageRole.ASSISTANT, text = last)
-                persist(currentSession)
-            }
-            isGenerating = false
-            status = if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null
-            DiagnosticLogger.w(
-                "CHAT",
-                "response_timeout provider=${provider.id} lastResponseChars=${last.length} baselineChars=${baselineResponse.length}"
+            awaitProviderResponse(
+                runtime = runtime,
+                currentSession = currentSession,
+                provider = provider,
+                baselineResponse = baselineResponse,
+                replaceLastAssistant = false,
+                source = "send"
             )
+        }
+    }
+
+    fun runProviderAction(action: String, runtime: WebRuntime) {
+        if (action == "retry" || action == "continue") {
+            if (isGenerating) return
+        }
+        val currentSession = session
+        val provider = selectedProvider
+        viewModelScope.launch {
+            val generationAction = action == "retry" || action == "continue"
+            val baselineResponse = if (generationAction) responseBaseline(runtime, currentSession, provider) else ""
+            val result = runCatching { runtime.performAction(currentSession, provider, action) }
+                .onFailure { DiagnosticLogger.e("CAP", "provider_action_exception provider=${provider.id} action=$action", it) }
+                .getOrDefault("")
+
+            if (result != "ok" && result != "scheduled") {
+                status = "${provider.name} 当前页面不支持此操作（$action）。"
+                return@launch
+            }
+
+            when (action) {
+                "retry", "continue" -> {
+                    isGenerating = true
+                    status = if (action == "retry") "正在重新生成…" else "正在继续生成…"
+                    awaitProviderResponse(
+                        runtime = runtime,
+                        currentSession = currentSession,
+                        provider = provider,
+                        baselineResponse = baselineResponse,
+                        replaceLastAssistant = true,
+                        source = "action:$action"
+                    )
+                }
+                "deleteConversation" -> {
+                    messages.clear()
+                    conversationStore.clear(currentSession)
+                    status = null
+                }
+                else -> status = null
+            }
         }
     }
 
@@ -256,6 +208,130 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             runtime.newChat(current, selectedProvider)
             status = null
         }
+    }
+
+    private suspend fun responseBaseline(runtime: WebRuntime, currentSession: SessionKey, provider: ProviderSpec): String {
+        val baseline = runCatching { runtime.lastResponse(currentSession, provider) }
+            .onFailure { DiagnosticLogger.w("CHAT", "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}") }
+            .getOrDefault("")
+        DiagnosticLogger.d("CHAT", "response_baseline provider=${provider.id} chars=${baseline.length}")
+        return baseline
+    }
+
+    private suspend fun awaitProviderResponse(
+        runtime: WebRuntime,
+        currentSession: SessionKey,
+        provider: ProviderSpec,
+        baselineResponse: String,
+        replaceLastAssistant: Boolean,
+        source: String
+    ) {
+        var last = ""
+        var stableCount = 0
+        var sawGenerating = false
+        var idleAfterGenerating = 0
+        var staleLogged = false
+
+        for (poll in 0 until 180) {
+            delay(700)
+            val response = runCatching { runtime.lastResponse(currentSession, provider) }
+                .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll source=$source type=${it.javaClass.simpleName}") }
+                .getOrDefault("")
+            val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
+            val changedFromBaseline = response.isNotBlank() && response != baselineResponse
+
+            if (generating) {
+                sawGenerating = true
+                idleAfterGenerating = 0
+            } else if (sawGenerating && !changedFromBaseline) {
+                idleAfterGenerating++
+            } else {
+                idleAfterGenerating = 0
+            }
+
+            val identicalAfterGeneration = response.isNotBlank() &&
+                response == baselineResponse &&
+                sawGenerating &&
+                !generating &&
+                idleAfterGenerating >= 3
+            val freshResponse = changedFromBaseline || identicalAfterGeneration
+
+            if (!freshResponse && response.isNotBlank() && !staleLogged) {
+                staleLogged = true
+                DiagnosticLogger.d(
+                    "CHAT",
+                    "stale_response_ignored provider=${provider.id} poll=$poll source=$source chars=${response.length} baselineChars=${baselineResponse.length}"
+                )
+            }
+
+            if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
+                DiagnosticLogger.d(
+                    "CHAT",
+                    "response_poll provider=${provider.id} poll=$poll source=$source responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse}"
+                )
+                if (response.isBlank() || !freshResponse) {
+                    val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
+                    if (probe.isNotBlank()) {
+                        DiagnosticLogger.d(
+                            "CHAT",
+                            "dom_probe provider=${provider.id} poll=$poll source=$source summary=${DiagnosticLogger.scrub(probe).take(1400)}"
+                        )
+                    }
+                }
+            }
+
+            if (freshResponse) {
+                if (response == last) stableCount++ else stableCount = 0
+                last = response
+                if (!generating && stableCount >= 2) {
+                    commitAssistantResponse(response, currentSession, replaceLastAssistant)
+                    isGenerating = false
+                    status = null
+                    DiagnosticLogger.i(
+                        "CHAT",
+                        "response_completed provider=${provider.id} source=$source responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length}"
+                    )
+                    return
+                }
+            } else {
+                stableCount = 0
+            }
+
+            if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank() && response.isBlank()) {
+                val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
+                DiagnosticLogger.w(
+                    "CHAT",
+                    "response_extract_failed provider=${provider.id} poll=$poll source=$source probe=${DiagnosticLogger.scrub(probe).take(1400)}"
+                )
+                isGenerating = false
+                status = "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。"
+                return
+            }
+        }
+
+        if (last.isNotBlank()) {
+            commitAssistantResponse(last, currentSession, replaceLastAssistant)
+        }
+        isGenerating = false
+        status = if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null
+        DiagnosticLogger.w(
+            "CHAT",
+            "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.length} baselineChars=${baselineResponse.length}"
+        )
+    }
+
+    private fun commitAssistantResponse(text: String, target: SessionKey, replaceLastAssistant: Boolean) {
+        if (replaceLastAssistant) {
+            val index = messages.indexOfLast { it.role == MessageRole.ASSISTANT }
+            if (index >= 0) {
+                messages[index] = messages[index].copy(text = text, timestamp = System.currentTimeMillis())
+            } else {
+                messages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
+            }
+        } else {
+            messages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
+        }
+        persist(target)
     }
 
     private fun reloadConversation() {
