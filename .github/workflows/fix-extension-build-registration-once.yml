@@ -1,0 +1,50 @@
+name: One-shot exact Titanium extension build registration fix
+
+on:
+  push:
+    branches: ['refactor/titanium-extension']
+    paths: ['.github/workflows/fix-extension-build-registration-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/titanium-extension
+          fetch-depth: 0
+      - name: Patch exact installed extension build check
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java')
+          t=p.read_text(encoding='utf-8')
+          old='''    private String externalExtensionsDir;\n    private String extensionId;\n'''
+          new='''    private String externalExtensionsDir;\n    private String extensionId;\n    private String extensionBuildId;\n'''
+          if old not in t: raise SystemExit('field marker missing')
+          t=t.replace(old,new,1)
+          old='''        String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();\n        extensionId = readAssetText("titanium-extension/" + EXTENSION_ID_FILE).trim();\n'''
+          new='''        String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();\n        extensionBuildId = expectedBuild;\n        extensionId = readAssetText("titanium-extension/" + EXTENSION_ID_FILE).trim();\n'''
+          if old not in t: raise SystemExit('assignment marker missing')
+          t=t.replace(old,new,1)
+          start=t.index('    private boolean isExtensionRegistered() throws Exception {')
+          end=t.index('\n    private void ensureChromiumUserData', start)
+          method='''    private boolean isExtensionRegistered() throws Exception {\n        if (extensionBuildId == null || extensionBuildId.isEmpty()) return false;\n        String command = "for x in " + q(titaniumDataDir + "/app_chrome")\n                + "/*/Extensions/" + extensionId + "/*/" + BUILD_ID_FILE + "; do "\n                + "[ -f \\\"$x\\\" ] && [ \\\"$(cat \\\"$x\\\" 2>/dev/null)\\\" = " + q(extensionBuildId)\n                + " ] && { echo yes; exit 0; }; done; true";\n        return "yes".equals(runSu(command, 8).trim());\n    }\n'''
+          t=t[:start]+method+t[end:]
+          p.write_text(t,encoding='utf-8')
+          PY
+      - name: Verify patch
+        run: |
+          grep -q 'private String extensionBuildId;' app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          grep -q 'Extensions/.*BUILD_ID_FILE' app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          git diff --check
+      - name: Commit source fix
+        run: |
+          git config user.name 'AIHub CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/com/yagay/aihub/titanium/TitaniumManager.java
+          git commit -m 'Verify exact installed Titanium extension build'
+          git push origin HEAD:refactor/titanium-extension
