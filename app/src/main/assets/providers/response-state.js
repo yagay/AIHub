@@ -83,16 +83,6 @@
     return textOf(clone);
   };
 
-  const contentFromTurn = (turn) => {
-    if (!turn) return "";
-    const candidates = domSort(allWithin(turn, cfg.responseContentSelectors || []));
-    for (let i = candidates.length - 1; i >= 0; i--) {
-      const value = cleanedText(candidates[i]);
-      if (value) return value;
-    }
-    return cleanedText(turn);
-  };
-
   const allWithin = (root, selectors) => {
     const out = [];
     const seen = new Set();
@@ -107,6 +97,16 @@
       } catch (_) {}
     });
     return out;
+  };
+
+  const contentFromTurn = (turn) => {
+    if (!turn) return "";
+    const candidates = domSort(allWithin(turn, cfg.responseContentSelectors || []));
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const value = cleanedText(candidates[i]);
+      if (value) return value;
+    }
+    return cleanedText(turn);
   };
 
   const turnViaCopyButton = () => {
@@ -169,7 +169,7 @@
     const responseCount = all(cfg.responseSelectors || []).length;
     const turnCount = all(cfg.turnSelectors || []).length;
     const keyBase = candidate.node ? nodePath(candidate.node) : "";
-    const key = keyBase ? `${location.pathname}|${simpleHash(keyBase)}` : `${location.pathname}|none`;
+    const key = simpleHash(`${location.pathname}|${keyBase || "none"}`);
     const now = Date.now();
     if (candidate.text !== runtime.lastText || key !== runtime.lastKey) {
       runtime.lastText = candidate.text;
@@ -184,7 +184,7 @@
       responseCount,
       turnCount,
       textChars: candidate.text.length,
-      path: location.pathname,
+      pathHash: simpleHash(location.pathname),
       quietMs: runtime.lastTextChangeAt ? Math.max(0, now - runtime.lastTextChangeAt) : -1
     };
   };
