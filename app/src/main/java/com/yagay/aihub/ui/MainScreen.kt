@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
@@ -266,7 +267,13 @@ private fun EmptyState() {
 
 @Composable
 private fun WebHost(runtime: WebRuntime, viewModel: AIHubViewModel, visible: Boolean) {
-    Box(modifier = if (visible) Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background) else Modifier.size(1.dp).alpha(0f)) {
+    val hostModifier = Modifier
+        .fillMaxSize()
+        .zIndex(if (visible) 2f else -1f)
+        .alpha(if (visible) 1f else 0f)
+        .then(if (visible) Modifier.background(MaterialTheme.colorScheme.background) else Modifier)
+
+    Box(modifier = hostModifier) {
         AndroidView(
             factory = { context -> FrameLayout(context).also { runtime.attach(it, viewModel.session, viewModel.selectedProvider) } },
             update = { host -> runtime.attach(host, viewModel.session, viewModel.selectedProvider) },
