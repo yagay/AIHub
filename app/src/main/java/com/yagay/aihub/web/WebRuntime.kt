@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.yagay.aihub.data.ConversationBindingStore
+import com.yagay.aihub.data.PendingAttachmentStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ProviderSpec
 import com.yagay.aihub.model.SessionKey
@@ -60,6 +61,7 @@ class WebRuntime(private val context: Context) {
 
     private val loader = ScriptLoader(context)
     private val bindingStore = ConversationBindingStore(context.applicationContext)
+    private val pendingAttachmentStore = PendingAttachmentStore(context.applicationContext)
     private val webViews = linkedMapOf<String, WebView>()
     private val attachmentBridges = linkedMapOf<String, NativeAttachmentBridge>()
     private val restoredKeys = mutableSetOf<String>()
@@ -155,17 +157,24 @@ class WebRuntime(private val context: Context) {
         provider: ProviderSpec,
         uris: List<Uri>
     ): AttachmentAttachResult {
-        if (uris.isEmpty()) return AttachmentAttachResult(0, emptyList(), "no-selection")
+        if (uris.isEmpty()) {
+            pendingAttachmentStore.clear(session)
+            return AttachmentAttachResult(0, emptyList(), "no-selection")
+        }
         ensureLoaded(session, provider)
         val key = webViewKey(session, provider)
         val bridge = attachmentBridges[key]
-            ?: return AttachmentAttachResult(0, emptyList(), "bridge-unavailable")
+            ?: run {
+                pendingAttachmentStore.clear(session)
+                return AttachmentAttachResult(0, emptyList(), "bridge-unavailable")
+            }
 
         val staged = runCatching {
             withContext(Dispatchers.IO) { bridge.stage(uris) }
         }.onFailure {
             DiagnosticLogger.e("FILE", "attachment_stage_failed provider=${provider.id}", it)
         }.getOrElse {
+            pendingAttachmentStore.clear(session)
             return AttachmentAttachResult(0, emptyList(), "stage-failed")
         }
 
@@ -175,6 +184,7 @@ class WebRuntime(private val context: Context) {
         )
         if (staged.names.isEmpty()) {
             bridge.clearNative()
+            pendingAttachmentStore.clear(session)
             return AttachmentAttachResult(0, emptyList(), "empty-stage")
         }
 
@@ -201,10 +211,12 @@ class WebRuntime(private val context: Context) {
 
         val probe = call(session, provider, "attachmentProbe").orEmpty()
         if (attachedCount > 0) {
-            val attachedNames = staged.names.take(attachedCount)
+            val attachedMetadata = staged.attachments.take(attachedCount)
+            val attachedNames = attachedMetadata.map { it.name }
+            pendingAttachmentStore.save(session, attachedMetadata)
             DiagnosticLogger.i(
                 "FILE",
-                "attachment_injected provider=${provider.id} attached=$attachedCount selected=${staged.names.size} probe=${DiagnosticLogger.scrub(probe).take(800)}"
+                "attachment_injected provider=${provider.id} attached=$attachedCount selected=${staged.names.size} metadata=${attachedMetadata.size} probe=${DiagnosticLogger.scrub(probe).take(800)}"
             )
             bridge.clearNative()
             return AttachmentAttachResult(attachedCount, attachedNames)
@@ -215,6 +227,7 @@ class WebRuntime(private val context: Context) {
             "attachment_injection_failed provider=${provider.id} result=${result ?: "null"} probe=${DiagnosticLogger.scrub(probe).take(1000)}"
         )
         bridge.clearNative()
+        pendingAttachmentStore.clear(session)
         return AttachmentAttachResult(0, emptyList(), result ?: "null-result")
     }
 
@@ -360,6 +373,7 @@ class WebRuntime(private val context: Context) {
 
     suspend fun newChat(session: SessionKey, provider: ProviderSpec) {
         bindingStore.clear(session)
+        pendingAttachmentStore.clear(session)
         preferredUrls.remove(webViewKey(session, provider))
         ensureLoaded(session, provider)
         val result = call(session, provider, "newChat")
