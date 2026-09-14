@@ -1,6 +1,9 @@
 package com.yagay.aihub.ui
 
 import android.widget.FrameLayout
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -58,13 +62,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.web.WebRuntime
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,8 +80,28 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     val runtime = remember { runtimeFactory() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var prompt by remember { mutableStateOf("") }
     var showAddAccount by remember { mutableStateOf(false) }
+
+    val exportDiagnostics = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri == null) {
+            DiagnosticLogger.i("EXPORT", "diagnostic_export_cancelled")
+        } else {
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    DiagnosticLogger.export(context.applicationContext, uri)
+                }
+                Toast.makeText(
+                    context,
+                    if (result.isSuccess) "诊断日志已导出" else "导出失败：${result.exceptionOrNull()?.message ?: "未知错误"}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
 
     DisposableEffect(Unit) { onDispose { runtime.destroy() } }
 
@@ -113,6 +141,19 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     selected = false,
                     onClick = { showAddAccount = true },
                     icon = { Icon(Icons.Default.Add, null) },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                NavigationDrawerItem(
+                    label = { Text("导出诊断日志") },
+                    selected = false,
+                    onClick = {
+                        DiagnosticLogger.i("EXPORT", "diagnostic_export_ui_requested")
+                        scope.launch {
+                            drawerState.close()
+                            exportDiagnostics.launch(DiagnosticLogger.suggestedFileName())
+                        }
+                    },
+                    icon = { Icon(Icons.Outlined.BugReport, null) },
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
             }
