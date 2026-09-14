@@ -1,6 +1,9 @@
 window.__AIHUB_CONFIG__ = {
   homeUrl: "https://chatgpt.com/",
   inputSelectors: [
+    "#mobile-composer-prompt",
+    "textarea[name='prompt'][aria-label*='Chat with ChatGPT' i]",
+    "textarea[placeholder*='Ask ChatGPT' i]",
     "#prompt-textarea[contenteditable='true']",
     "#prompt-textarea",
     "[data-testid='prompt-textarea']",
@@ -14,7 +17,9 @@ window.__AIHUB_CONFIG__ = {
     "[contenteditable='true'][data-placeholder]"
   ],
   loggedInSelectors: [
+    "#mobile-composer-prompt",
     "#prompt-textarea",
+    "button[aria-label='Add files and more']",
     "[data-testid='composer-plus-btn']",
     "a[data-testid='create-new-chat-button']",
     "#history a[href^='/c/']",
@@ -23,7 +28,14 @@ window.__AIHUB_CONFIG__ = {
     "a[href^='/uc/']",
     "button[data-testid='model-switcher-dropdown-button']"
   ],
+  attachmentButtonSelectors: [
+    "button[aria-label='Add files and more']",
+    "button[aria-label*='Add files' i]",
+    "[data-testid='composer-plus-btn']"
+  ],
   sendSelectors: [
+    "button[type='submit'][aria-label='Send message']",
+    "button[aria-label='Send message']",
     "#composer-submit-button",
     "button[data-testid='send-button']",
     "button[data-testid*='composer-send']",
@@ -75,12 +87,18 @@ window.__AIHUB_CONFIG__ = {
   ],
   modelSelectors: [
     "button[data-testid='model-switcher-dropdown-button']",
+    "button[aria-label*='model' i]",
     "button[aria-haspopup='menu'][data-tone='neutral']",
     "button.__composer-pill"
   ],
   searchSelectors: [
-    "button[data-testid*='search' i]",
-    "button[aria-label*='search' i]"
+    "button[aria-label*='search the web' i]",
+    "button[aria-label*='web search' i]",
+    "button[data-testid*='web-search' i]"
+  ],
+  deepResearchSelectors: [
+    "button[aria-label*='deep research' i]",
+    "button[data-testid*='deep-research' i]"
   ],
   reasoningSelectors: [
     "button[data-testid*='intelligence' i]",
@@ -89,6 +107,7 @@ window.__AIHUB_CONFIG__ = {
     "button[aria-label*='thinking' i]"
   ],
   toolsSelectors: [
+    "button[aria-label='Add files and more']",
     "button[data-testid*='tools' i]",
     "button[aria-label*='tools' i]"
   ],
@@ -103,6 +122,7 @@ window.__AIHUB_CONFIG__ = {
     "button[aria-label*='continue' i]"
   ],
   copyButtonSelectors: [
+    "button[aria-label='Copy response']",
     "button[data-testid='copy-turn-action-button']",
     "button[aria-label='Copy']",
     "button[aria-label*='Copy' i]"
