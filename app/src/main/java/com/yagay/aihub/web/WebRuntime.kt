@@ -70,6 +70,11 @@ class WebRuntime(private val context: Context) {
     suspend fun isGenerating(session: SessionKey, provider: ProviderSpec): Boolean =
         call(session, provider, "isGenerating") == "true"
 
+    suspend fun probeSummary(session: SessionKey, provider: ProviderSpec): String {
+        ensureLoaded(session, provider)
+        return call(session, provider, "probeSummary").orEmpty()
+    }
+
     suspend fun newChat(session: SessionKey, provider: ProviderSpec) {
         ensureLoaded(session, provider)
         val result = call(session, provider, "newChat")
