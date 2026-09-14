@@ -174,11 +174,11 @@ public final class TitaniumManager {
         String command = "for p in " + q(titaniumDataDir + "/app_chrome")
                 + "/*/Preferences " + q(titaniumDataDir + "/app_chrome")
                 + "/*/'Secure Preferences'; do "
-                + "[ -f \\\"$p\\\" ] && grep -q -F " + q(extensionId)
-                + " \\\"$p\\\" 2>/dev/null && { echo yes; exit 0; }; done; "
+                + "[ -f \"$p\" ] && grep -q -F " + q(extensionId)
+                + " \"$p\" 2>/dev/null && { echo yes; exit 0; }; done; "
                 + "for x in " + q(titaniumDataDir + "/app_chrome")
                 + "/*/Extensions/" + extensionId + "; do "
-                + "[ -d \\\"$x\\\" ] && { echo yes; exit 0; }; done; true";
+                + "[ -d \"$x\" ] && { echo yes; exit 0; }; done; true";
         return "yes".equals(runSu(command, 8).trim());
     }
 
