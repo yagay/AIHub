@@ -42,10 +42,27 @@ class WebRuntime(private val context: Context) {
         val failure: String? = null
     )
 
+    data class ResponseSnapshot(
+        val text: String = "",
+        val key: String = "",
+        val source: String = "none",
+        val responseCount: Int = 0,
+        val turnCount: Int = 0,
+        val state: String = "idle",
+        val reason: String = "",
+        val path: String = "",
+        val quietMs: Long = -1L
+    ) {
+        val isGenerating: Boolean get() = state == "generating" || state == "queued" || state == "uploading"
+    }
+
     private val loader = ScriptLoader(context)
     private val webViews = linkedMapOf<String, WebView>()
     private val attachmentBridges = linkedMapOf<String, NativeAttachmentBridge>()
+    private val restoredKeys = mutableSetOf<String>()
+    private val preferredUrls = mutableMapOf<String, String>()
     private var fileChooserLauncher: ((Intent) -> Unit)? = null
+    private var pageChangeListener: ((SessionKey, ProviderSpec, String) -> Unit)? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingFileProvider: String? = null
 
@@ -59,6 +76,10 @@ class WebRuntime(private val context: Context) {
     fun setFileChooserLauncher(launcher: ((Intent) -> Unit)?) {
         fileChooserLauncher = launcher
         DiagnosticLogger.d("FILE", "file_chooser_launcher_set available=${launcher != null}")
+    }
+
+    fun setPageChangeListener(listener: ((SessionKey, ProviderSpec, String) -> Unit)?) {
+        pageChangeListener = listener
     }
 
     fun handleFileChooserResult(resultCode: Int, data: Intent?) {
@@ -84,16 +105,39 @@ class WebRuntime(private val context: Context) {
         pendingFileProvider = null
     }
 
-    fun attach(host: FrameLayout, session: SessionKey, provider: ProviderSpec) {
+    fun attach(
+        host: FrameLayout,
+        session: SessionKey,
+        provider: ProviderSpec,
+        preferredUrl: String? = null
+    ) {
+        val key = webViewKey(session, provider)
+        val validPreferred = sameOriginUrl(preferredUrl, provider.homeUrl)
+        if (validPreferred != null) preferredUrls[key] = validPreferred
+
         val webView = obtain(session, provider)
         (webView.parent as? ViewGroup)?.removeView(webView)
         host.removeAllViews()
-        host.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        if (webView.url.isNullOrBlank()) {
-            DiagnosticLogger.d("WEB", "load_home provider=${provider.id}")
-            webView.loadUrl(provider.homeUrl)
+        host.addView(
+            webView,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
+
+        if (!restoredKeys.contains(key)) {
+            restoredKeys += key
+            val target = preferredUrls[key] ?: provider.homeUrl
+            DiagnosticLogger.i(
+                "WEB",
+                "initial_load provider=${provider.id} restored=${preferredUrls[key] != null} url=${safeUrl(target)}"
+            )
+            webView.loadUrl(target)
+        } else if (webView.url.isNullOrBlank()) {
+            webView.loadUrl(preferredUrls[key] ?: provider.homeUrl)
         }
     }
+
+    fun currentUrl(session: SessionKey, provider: ProviderSpec): String? =
+        webViews[webViewKey(session, provider)]?.url
 
     suspend fun isLoggedIn(session: SessionKey, provider: ProviderSpec): Boolean {
         ensureLoaded(session, provider)
@@ -133,7 +177,10 @@ class WebRuntime(private val context: Context) {
         var result = call(session, provider, "attachStagedFiles")
         if (result == "no-input") {
             val prepared = call(session, provider, "prepareAttachmentInput")
-            DiagnosticLogger.d("FILE", "attachment_prepare_input provider=${provider.id} result=${prepared ?: "null"}")
+            DiagnosticLogger.d(
+                "FILE",
+                "attachment_prepare_input provider=${provider.id} result=${prepared ?: "null"}"
+            )
             delay(350)
             result = call(session, provider, "attachStagedFiles")
             if (result == "no-input") {
@@ -170,7 +217,10 @@ class WebRuntime(private val context: Context) {
     suspend fun openAttachmentPicker(session: SessionKey, provider: ProviderSpec): Boolean {
         ensureLoaded(session, provider)
         val result = call(session, provider, "openAttachmentPicker")
-        DiagnosticLogger.i("FILE", "attachment_picker_requested provider=${provider.id} result=${result ?: "null"}")
+        DiagnosticLogger.i(
+            "FILE",
+            "attachment_picker_requested provider=${provider.id} result=${result ?: "null"}"
+        )
         if (result == "opened-input" || result == "opened-button") return true
 
         val probe = call(session, provider, "attachmentProbe").orEmpty()
@@ -184,35 +234,56 @@ class WebRuntime(private val context: Context) {
     suspend fun send(session: SessionKey, provider: ProviderSpec, prompt: String): Boolean {
         ensureLoaded(session, provider)
         val result = call(session, provider, "send", JSONObject.quote(prompt))
-        DiagnosticLogger.i("WEB", "adapter_send provider=${provider.id} promptChars=${prompt.length} result=${result ?: "null"}")
+        DiagnosticLogger.i(
+            "WEB",
+            "adapter_send provider=${provider.id} promptChars=${prompt.length} result=${result ?: "null"}"
+        )
 
         if (result == "ok") return true
-        if (result != "verify") return false
+        if (result != "verify" && result != "queued") return false
 
-        for (attempt in 0 until 12) {
-            delay(200)
+        val maxAttempts = if (result == "queued") 72 else 24
+        for (attempt in 0 until maxAttempts) {
+            delay(220)
             val acknowledged = call(session, provider, "submissionAcknowledged") == "true"
             if (acknowledged) {
-                DiagnosticLogger.i("WEB", "adapter_send_verified provider=${provider.id} attempts=${attempt + 1}")
+                DiagnosticLogger.i(
+                    "WEB",
+                    "adapter_send_verified provider=${provider.id} result=$result attempts=${attempt + 1}"
+                )
                 return true
+            }
+
+            if (attempt == 0 || attempt == 7 || attempt == 23 || attempt == maxAttempts - 1) {
+                val status = call(session, provider, "submissionStatus").orEmpty()
+                DiagnosticLogger.d(
+                    "WEB",
+                    "send_verification_pending provider=${provider.id} result=$result attempt=${attempt + 1}/$maxAttempts status=${DiagnosticLogger.scrub(status).take(900)}"
+                )
+                if (status.contains("attachment-button-timeout")) break
             }
         }
 
+        val status = call(session, provider, "submissionStatus").orEmpty()
         val probe = call(session, provider, "probeSummary").orEmpty()
         DiagnosticLogger.w(
             "WEB",
-            "send_verification_failed provider=${provider.id} probe=${DiagnosticLogger.scrub(probe).take(1400)}"
+            "send_verification_failed provider=${provider.id} result=$result status=${DiagnosticLogger.scrub(status).take(900)} probe=${DiagnosticLogger.scrub(probe).take(1400)}"
         )
         return false
     }
 
-    suspend fun lastResponse(session: SessionKey, provider: ProviderSpec): String {
+    suspend fun responseSnapshot(session: SessionKey, provider: ProviderSpec): ResponseSnapshot {
         ensureLoaded(session, provider)
-        return call(session, provider, "extractLastResponse").orEmpty()
+        val raw = call(session, provider, "generationState").orEmpty()
+        return parseResponseSnapshot(raw)
     }
 
+    suspend fun lastResponse(session: SessionKey, provider: ProviderSpec): String =
+        responseSnapshot(session, provider).text
+
     suspend fun isGenerating(session: SessionKey, provider: ProviderSpec): Boolean =
-        call(session, provider, "isGenerating") == "true"
+        responseSnapshot(session, provider).isGenerating
 
     suspend fun probeSummary(session: SessionKey, provider: ProviderSpec): String {
         ensureLoaded(session, provider)
@@ -244,11 +315,19 @@ class WebRuntime(private val context: Context) {
     suspend fun openOptionPicker(session: SessionKey, provider: ProviderSpec, kind: String): String {
         ensureLoaded(session, provider)
         val result = call(session, provider, "openOptionPicker", JSONObject.quote(kind)).orEmpty()
-        DiagnosticLogger.i("CAP", "open_option_picker provider=${provider.id} kind=$kind result=${result.ifBlank { "null" }}")
+        DiagnosticLogger.i(
+            "CAP",
+            "open_option_picker provider=${provider.id} kind=$kind result=${result.ifBlank { "null" }}"
+        )
         return result
     }
 
-    suspend fun selectOption(session: SessionKey, provider: ProviderSpec, kind: String, value: String): String {
+    suspend fun selectOption(
+        session: SessionKey,
+        provider: ProviderSpec,
+        kind: String,
+        value: String
+    ): String {
         ensureLoaded(session, provider)
         val args = "${JSONObject.quote(kind)},${JSONObject.quote(value)}"
         val result = call(session, provider, "selectOption", args).orEmpty()
@@ -291,6 +370,7 @@ class WebRuntime(private val context: Context) {
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
         pendingFileProvider = null
+        pageChangeListener = null
         attachmentBridges.values.forEach { it.clearNative() }
         attachmentBridges.clear()
         webViews.values.forEach { webView ->
@@ -300,6 +380,8 @@ class WebRuntime(private val context: Context) {
             webView.destroy()
         }
         webViews.clear()
+        restoredKeys.clear()
+        preferredUrls.clear()
     }
 
     private fun webViewKey(session: SessionKey, provider: ProviderSpec): String =
@@ -398,7 +480,8 @@ class WebRuntime(private val context: Context) {
                     }
 
                     override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                        if (consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR ||
+                        if (
+                            consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.ERROR ||
                             consoleMessage.messageLevel() == ConsoleMessage.MessageLevel.WARNING
                         ) {
                             DiagnosticLogger.w(
@@ -412,21 +495,40 @@ class WebRuntime(private val context: Context) {
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                        DiagnosticLogger.i("WEB", "page_started provider=${provider.id} url=${safeUrl(url)}")
+                        DiagnosticLogger.i(
+                            "WEB",
+                            "page_started provider=${provider.id} url=${safeUrl(url)}"
+                        )
                         super.onPageStarted(view, url, favicon)
                     }
 
                     override fun onPageFinished(view: WebView, url: String?) {
-                        DiagnosticLogger.i("WEB", "page_finished provider=${provider.id} url=${safeUrl(url)}")
+                        DiagnosticLogger.i(
+                            "WEB",
+                            "page_finished provider=${provider.id} url=${safeUrl(url)}"
+                        )
+                        val sameOrigin = sameOriginUrl(url, provider.homeUrl)
+                        if (sameOrigin != null) {
+                            preferredUrls[key] = sameOrigin
+                            pageChangeListener?.invoke(session, provider, sameOrigin)
+                        }
                         super.onPageFinished(view, url)
                     }
 
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = handleUri(request.url)
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): Boolean = handleUri(request.url)
 
                     @Deprecated("Deprecated in Android")
-                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean = handleUri(Uri.parse(url))
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
+                        handleUri(Uri.parse(url))
 
-                    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    override fun onReceivedError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        error: WebResourceError
+                    ) {
                         if (request.isForMainFrame) {
                             DiagnosticLogger.e(
                                 "WEB",
@@ -436,7 +538,11 @@ class WebRuntime(private val context: Context) {
                         super.onReceivedError(view, request, error)
                     }
 
-                    override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                    override fun onReceivedHttpError(
+                        view: WebView,
+                        request: WebResourceRequest,
+                        errorResponse: WebResourceResponse
+                    ) {
                         if (request.isForMainFrame) {
                             DiagnosticLogger.w(
                                 "WEB",
@@ -446,7 +552,6 @@ class WebRuntime(private val context: Context) {
                         super.onReceivedHttpError(view, request, errorResponse)
                     }
                 }
-                loadUrl(provider.homeUrl)
             }
         }
     }
@@ -455,7 +560,9 @@ class WebRuntime(private val context: Context) {
         if (uri.scheme == "http" || uri.scheme == "https") return false
         DiagnosticLogger.i("WEB", "external_scheme scheme=${uri.scheme.orEmpty()}")
         return runCatching {
-            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
             true
         }.onFailure {
             DiagnosticLogger.e("WEB", "external_scheme_failed scheme=${uri.scheme.orEmpty()}", it)
@@ -463,17 +570,28 @@ class WebRuntime(private val context: Context) {
     }
 
     private suspend fun ensureLoaded(session: SessionKey, provider: ProviderSpec) {
+        val key = webViewKey(session, provider)
         val webView = obtain(session, provider)
-        if (webView.url.isNullOrBlank()) webView.loadUrl(provider.homeUrl)
+        if (webView.url.isNullOrBlank()) {
+            webView.loadUrl(preferredUrls[key] ?: provider.homeUrl)
+        }
         repeat(40) {
             val state = evalRaw(webView, "document.readyState")
             if (state == "complete" || state == "interactive") return
             delay(250)
         }
-        DiagnosticLogger.w("WEB", "document_ready_timeout provider=${provider.id} url=${safeUrl(webView.url)}")
+        DiagnosticLogger.w(
+            "WEB",
+            "document_ready_timeout provider=${provider.id} url=${safeUrl(webView.url)}"
+        )
     }
 
-    private suspend fun call(session: SessionKey, provider: ProviderSpec, action: String, argumentJs: String? = null): String? {
+    private suspend fun call(
+        session: SessionKey,
+        provider: ProviderSpec,
+        action: String,
+        argumentJs: String? = null
+    ): String? {
         val webView = obtain(session, provider)
         val source = loader.providerScript(provider.scriptAsset)
         val invocation = if (argumentJs == null) "$action()" else "$action($argumentJs)"
@@ -494,7 +612,11 @@ class WebRuntime(private val context: Context) {
             return null
         }
         val obj = runCatching { JSONObject(raw) }.getOrElse {
-            DiagnosticLogger.e("JS", "adapter_invalid_json provider=${provider.id} action=$action rawChars=${raw.length}", it)
+            DiagnosticLogger.e(
+                "JS",
+                "adapter_invalid_json provider=${provider.id} action=$action rawChars=${raw.length}",
+                it
+            )
             return null
         }
         if (!obj.optBoolean("ok", false)) {
@@ -512,26 +634,53 @@ class WebRuntime(private val context: Context) {
         }
     }
 
-    private suspend fun evalRaw(webView: WebView, script: String): String? = suspendCoroutine { continuation ->
-        runCatching {
-            webView.evaluateJavascript(script) { result ->
-                if (result == null || result == "null") {
-                    continuation.resume(null)
-                } else {
-                    val decoded = runCatching { JSONTokener(result).nextValue() }.getOrNull()
-                    continuation.resume(
-                        when (decoded) {
-                            null, JSONObject.NULL -> null
-                            is String -> decoded
-                            else -> decoded.toString().trim('"')
-                        }
-                    )
+    private suspend fun evalRaw(webView: WebView, script: String): String? =
+        suspendCoroutine { continuation ->
+            runCatching {
+                webView.evaluateJavascript(script) { result ->
+                    if (result == null || result == "null") {
+                        continuation.resume(null)
+                    } else {
+                        val decoded = runCatching { JSONTokener(result).nextValue() }.getOrNull()
+                        continuation.resume(
+                            when (decoded) {
+                                null, JSONObject.NULL -> null
+                                is String -> decoded
+                                else -> decoded.toString().trim('"')
+                            }
+                        )
+                    }
                 }
+            }.onFailure {
+                DiagnosticLogger.e("JS", "evaluate_javascript_failed", it)
+                continuation.resume(null)
             }
-        }.onFailure {
-            DiagnosticLogger.e("JS", "evaluate_javascript_failed", it)
-            continuation.resume(null)
         }
+
+    private fun parseResponseSnapshot(raw: String): ResponseSnapshot {
+        val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return ResponseSnapshot()
+        return ResponseSnapshot(
+            text = obj.optString("text"),
+            key = obj.optString("key"),
+            source = obj.optString("source", "none"),
+            responseCount = obj.optInt("responseCount", 0),
+            turnCount = obj.optInt("turnCount", 0),
+            state = obj.optString("state", "idle"),
+            reason = obj.optString("reason"),
+            path = obj.optString("path"),
+            quietMs = obj.optLong("quietMs", -1L)
+        )
+    }
+
+    private fun sameOriginUrl(raw: String?, homeUrl: String): String? {
+        if (raw.isNullOrBlank()) return null
+        return runCatching {
+            val target = Uri.parse(raw)
+            val home = Uri.parse(homeUrl)
+            if (target.scheme != "https" && target.scheme != "http") return@runCatching null
+            if (!target.host.equals(home.host, ignoreCase = true)) return@runCatching null
+            target.buildUpon().clearQuery().fragment(null).build().toString()
+        }.getOrNull()
     }
 
     private fun safeUrl(url: String?): String {
@@ -543,9 +692,20 @@ class WebRuntime(private val context: Context) {
                 append("://")
                 append(uri.host.orEmpty())
                 if (uri.port != -1) append(":${uri.port}")
-                append(uri.path.orEmpty())
+                append(redactPath(uri.path.orEmpty()))
             }
         }.getOrDefault("<invalid-url>")
+    }
+
+    private fun redactPath(path: String): String {
+        if (path.isBlank() || path == "/") return path
+        return path.split('/').joinToString("/") { segment ->
+            when {
+                segment.length >= 18 && segment.matches(Regex("[A-Za-z0-9_-]+")) -> "<id>"
+                segment.length >= 16 && segment.matches(Regex("[0-9a-fA-F-]+")) -> "<id>"
+                else -> segment
+            }
+        }
     }
 
     private fun safeSource(source: String?): String = safeUrl(source).take(240)
