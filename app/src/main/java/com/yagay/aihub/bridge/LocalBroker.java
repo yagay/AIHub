@@ -127,6 +127,9 @@ public final class LocalBroker implements Closeable {
                     item.put("open", client.open);
                     item.put("providers", new JSONArray(client.providers));
                     item.put("assignedCount", client.assigned.size());
+                    item.put("extensionVersion", client.extensionVersion);
+                    item.put("workerMarker", client.workerMarker);
+                    item.put("connectReason", client.connectReason);
                     clientArray.put(item);
                 }
                 root.put("clients", clientArray);
@@ -405,6 +408,9 @@ public final class LocalBroker implements Closeable {
                 synchronized (lock) {
                     client.providers.clear();
                     client.providers.addAll(providers);
+                    client.extensionVersion = message.optString("version", client.extensionVersion);
+                    client.workerMarker = message.optString("worker", client.workerMarker);
+                    client.connectReason = message.optString("reason", client.connectReason);
                 }
                 dispatchQueued();
                 return;
@@ -760,7 +766,7 @@ public final class LocalBroker implements Closeable {
 
         JSONObject toJson() throws org.json.JSONException {
             return new JSONObject()
-                    .put("type", "ask")
+                    .put("type", "command")
                     .put("id", id)
                     .put("provider", provider)
                     .put("prompt", prompt);
@@ -797,6 +803,9 @@ public final class LocalBroker implements Closeable {
         final Set<String> assigned = new HashSet<>();
         final Object sendLock = new Object();
         volatile boolean open = true;
+        volatile String extensionVersion = "";
+        volatile String workerMarker = "";
+        volatile String connectReason = "";
 
         WsClient(Socket socket, InputStream in, OutputStream out) {
             this.socket = socket;

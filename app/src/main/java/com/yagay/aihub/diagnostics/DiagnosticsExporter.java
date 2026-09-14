@@ -146,7 +146,7 @@ public final class DiagnosticsExporter {
                 + "for p in \"$d/app_chrome\"/*; do [ -d \"$p\" ] || continue; x=\"$p/Extensions/" + extensionId + "\"; [ -d \"$x\" ] || continue; "
                 + "echo \"PROFILE=$(basename \"$p\")\"; find \"$x\" -maxdepth 3 -type f -print 2>/dev/null | head -120; "
                 + "for m in \"$x\"/*/manifest.json; do [ -f \"$m\" ] && { echo \"manifest_file=$m\"; grep -m1 -E '\"version\"[[:space:]]*:' \"$m\" 2>/dev/null || true; }; done; "
-                + "for w in \"$x\"/*/service-worker.js; do [ -f \"$w\" ] && { grep -q 'AIHUB_BRIDGE_WORKER_V3' \"$w\" 2>/dev/null && echo worker_marker=AIHUB_BRIDGE_WORKER_V3 || echo worker_marker=old_or_missing; }; done; done; "
+                + "for w in \"$x\"/*/service-worker.js; do [ -f \"$w\" ] && { marker=$(grep -o -m1 'AIHUB_BRIDGE_WORKER_V[0-9][0-9]*' \"$w\" 2>/dev/null || true); [ -n \"$marker\" ] && echo worker_marker=\"$marker\" || echo worker_marker=old_or_missing; }; done; done; "
                 + "echo '--- profile files containing extension id (filenames only) ---'; "
                 + "for p in \"$d/app_chrome/Local State\" \"$d/app_chrome\"/*/Preferences \"$d/app_chrome\"/*/'Secure Preferences'; do "
                 + "[ -f \"$p\" ] && grep -q -F '" + extensionId + "' \"$p\" 2>/dev/null && echo \"contains_id=$p\"; done; "
