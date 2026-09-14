@@ -110,6 +110,14 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 DiagnosticLogger.w("CHAT", "login_preflight_false provider=${provider.id} action=try_send_anyway")
             }
 
+            // Capture the previous assistant text before submitting. Some sites
+            // keep the old reply in the DOM while a new turn is being created;
+            // without a baseline that stale text can be mistaken for the new reply.
+            val baselineResponse = runCatching { runtime.lastResponse(currentSession, provider) }
+                .onFailure { DiagnosticLogger.w("CHAT", "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}") }
+                .getOrDefault("")
+            DiagnosticLogger.d("CHAT", "response_baseline provider=${provider.id} chars=${baselineResponse.length}")
+
             val sent = runCatching { runtime.send(currentSession, provider, text) }
                 .onFailure { DiagnosticLogger.e("CHAT", "send_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
@@ -131,6 +139,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             var stableCount = 0
             var sawGenerating = false
             var idleAfterGenerating = 0
+            var staleLogged = false
 
             for (poll in 0 until 180) {
                 delay(700)
@@ -138,22 +147,42 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll type=${it.javaClass.simpleName}") }
                     .getOrDefault("")
                 val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
+                val changedFromBaseline = response.isNotBlank() && response != baselineResponse
 
                 if (generating) {
                     sawGenerating = true
                     idleAfterGenerating = 0
-                } else if (sawGenerating && response.isBlank()) {
+                } else if (sawGenerating && !changedFromBaseline) {
                     idleAfterGenerating++
                 } else {
                     idleAfterGenerating = 0
                 }
 
+                // If a provider exposes a reliable generating signal, allow an
+                // identical final answer after that generation cycle has ended.
+                // Providers such as Gemini that never expose that signal still
+                // require the DOM text to change from the pre-send baseline.
+                val identicalAfterGeneration = response.isNotBlank() &&
+                    response == baselineResponse &&
+                    sawGenerating &&
+                    !generating &&
+                    idleAfterGenerating >= 3
+                val freshResponse = changedFromBaseline || identicalAfterGeneration
+
+                if (!freshResponse && response.isNotBlank() && !staleLogged) {
+                    staleLogged = true
+                    DiagnosticLogger.d(
+                        "CHAT",
+                        "stale_response_ignored provider=${provider.id} poll=$poll chars=${response.length} baselineChars=${baselineResponse.length}"
+                    )
+                }
+
                 if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
                     DiagnosticLogger.d(
                         "CHAT",
-                        "response_poll provider=${provider.id} poll=$poll responseChars=${response.length} generating=$generating"
+                        "response_poll provider=${provider.id} poll=$poll responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse}"
                     )
-                    if (response.isBlank()) {
+                    if (response.isBlank() || !freshResponse) {
                         val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
                         if (probe.isNotBlank()) {
                             DiagnosticLogger.d(
@@ -164,7 +193,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                if (response.isNotBlank()) {
+                if (freshResponse) {
                     if (response == last) stableCount++ else stableCount = 0
                     last = response
                     if (!generating && stableCount >= 2) {
@@ -172,12 +201,17 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                         persist(currentSession)
                         isGenerating = false
                         status = null
-                        DiagnosticLogger.i("CHAT", "response_completed provider=${provider.id} responseChars=${response.length} polls=${poll + 1}")
+                        DiagnosticLogger.i(
+                            "CHAT",
+                            "response_completed provider=${provider.id} responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length}"
+                        )
                         return@launch
                     }
+                } else {
+                    stableCount = 0
                 }
 
-                if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank()) {
+                if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank() && response.isBlank()) {
                     val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
                     DiagnosticLogger.w(
                         "CHAT",
@@ -194,8 +228,11 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 persist(currentSession)
             }
             isGenerating = false
-            status = if (last.isBlank()) "没有读取到回复，可打开网页检查当前状态。" else null
-            DiagnosticLogger.w("CHAT", "response_timeout provider=${provider.id} lastResponseChars=${last.length}")
+            status = if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null
+            DiagnosticLogger.w(
+                "CHAT",
+                "response_timeout provider=${provider.id} lastResponseChars=${last.length} baselineChars=${baselineResponse.length}"
+            )
         }
     }
 
