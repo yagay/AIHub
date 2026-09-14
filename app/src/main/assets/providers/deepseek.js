@@ -1,6 +1,8 @@
 window.__AIHUB_CONFIG__ = {
   homeUrl: "https://chat.deepseek.com/",
+  homePath: "/",
   verifySubmission: true,
+  ambiguousStopSelector: true,
   inputSelectors: [
     "textarea[placeholder*='Message DeepSeek' i]",
     "textarea._27c9245",
@@ -19,6 +21,11 @@ window.__AIHUB_CONFIG__ = {
     "div.ds-button.ds-button--primary.ds-button--filled.ds-button--circle:not(.ds-button--disabled)",
     "div.ds-button--primary.ds-button--circle:not(.ds-button--disabled)",
     "div[role='button'].ds-button--primary:not(.ds-button--disabled)"
+  ],
+  sendProbeSelectors: [
+    "div.ds-button.ds-button--primary.ds-button--filled.ds-button--circle",
+    "div.ds-button--primary.ds-button--circle",
+    "div[role='button'].ds-button--primary"
   ],
   responseSelectors: [
     "div[class*='message-content']",
