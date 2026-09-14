@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,9 +33,11 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -49,6 +52,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -72,8 +76,10 @@ import androidx.compose.ui.zIndex
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
+import com.yagay.aihub.web.ProviderCapabilities
 import com.yagay.aihub.web.WebRuntime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -88,6 +94,12 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     var showAddAccount by remember { mutableStateOf(false) }
     var pendingAttachmentCount by remember { mutableIntStateOf(0) }
     var pendingAttachmentNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showCapabilities by remember { mutableStateOf(false) }
+    var capabilityLoading by remember { mutableStateOf(false) }
+    var capabilitySnapshot by remember { mutableStateOf<ProviderCapabilities?>(null) }
+    var optionKind by remember { mutableStateOf<String?>(null) }
+    var optionValues by remember { mutableStateOf<List<String>>(emptyList()) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     val webFileChooser = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -152,6 +164,62 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
         }
     }
 
+    fun refreshCapabilities(openDialog: Boolean = true) {
+        val provider = viewModel.selectedProvider
+        val targetSession = viewModel.session
+        capabilityLoading = true
+        if (openDialog) showCapabilities = true
+        scope.launch {
+            capabilitySnapshot = runCatching { runtime.capabilities(targetSession, provider) }
+                .onFailure { DiagnosticLogger.e("CAP", "capability_snapshot_exception provider=${provider.id}", it) }
+                .getOrDefault(ProviderCapabilities())
+            capabilityLoading = false
+        }
+    }
+
+    fun loadOptions(kind: String) {
+        val provider = viewModel.selectedProvider
+        val targetSession = viewModel.session
+        scope.launch {
+            val opened = runCatching { runtime.openOptionPicker(targetSession, provider, kind) }.getOrDefault("")
+            if (opened != "ok") {
+                Toast.makeText(context, "${provider.name} 当前没有找到${if (kind == "model") "模型" else "工具"}入口。", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            delay(260)
+            var values = runCatching { runtime.optionList(targetSession, provider, kind) }.getOrDefault(emptyList())
+            if (values.isEmpty()) {
+                delay(350)
+                values = runCatching { runtime.optionList(targetSession, provider, kind) }.getOrDefault(emptyList())
+            }
+            if (values.isEmpty()) {
+                Toast.makeText(context, "没有读取到选项，已打开官网。", Toast.LENGTH_SHORT).show()
+                viewModel.openWeb()
+            } else {
+                optionKind = kind
+                optionValues = values
+            }
+        }
+    }
+
+    fun performSimpleAction(action: String, openWebAfter: Boolean = false) {
+        val provider = viewModel.selectedProvider
+        val targetSession = viewModel.session
+        scope.launch {
+            val result = runCatching { runtime.performAction(targetSession, provider, action) }
+                .onFailure { DiagnosticLogger.e("CAP", "ui_action_exception provider=${provider.id} action=$action", it) }
+                .getOrDefault("")
+            Toast.makeText(
+                context,
+                if (result == "ok" || result == "scheduled") "${provider.name}：操作已执行" else "${provider.name}：当前页面不支持此操作",
+                Toast.LENGTH_SHORT
+            ).show()
+            if ((result == "ok" || result == "scheduled") && openWebAfter) viewModel.openWeb()
+            delay(220)
+            refreshCapabilities(openDialog = false)
+        }
+    }
+
     DisposableEffect(runtime) {
         runtime.setFileChooserLauncher { intent -> webFileChooser.launch(intent) }
         onDispose {
@@ -163,6 +231,9 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     LaunchedEffect(viewModel.selectedProviderId, viewModel.selectedAccountId) {
         pendingAttachmentCount = 0
         pendingAttachmentNames = emptyList()
+        capabilitySnapshot = null
+        optionKind = null
+        optionValues = emptyList()
     }
 
     ModalNavigationDrawer(
@@ -230,6 +301,7 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     },
                     navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "菜单") } },
                     actions = {
+                        IconButton(onClick = { refreshCapabilities() }) { Icon(Icons.Outlined.Tune, "功能") }
                         IconButton(onClick = { viewModel.openWeb() }) { Icon(Icons.Default.Language, "打开官网") }
                         IconButton(onClick = { viewModel.newChat(runtime) }) { Icon(Icons.Outlined.DeleteSweep, "新对话") }
                     }
@@ -279,6 +351,161 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
             onAdd = { showAddAccount = false; viewModel.addAccount(it, runtime) }
         )
     }
+
+    if (showCapabilities) {
+        CapabilityDialog(
+            providerName = viewModel.selectedProvider.name,
+            capabilities = capabilitySnapshot,
+            loading = capabilityLoading,
+            onDismiss = { showCapabilities = false },
+            onRefresh = { refreshCapabilities(openDialog = false) },
+            onModel = { showCapabilities = false; loadOptions("model") },
+            onTools = { showCapabilities = false; loadOptions("tool") },
+            onAction = { action ->
+                showCapabilities = false
+                when (action) {
+                    "retry", "continue" -> viewModel.runProviderAction(action, runtime)
+                    "deleteConversation" -> confirmDelete = true
+                    "edit", "history", "rename", "voice" -> performSimpleAction(action, openWebAfter = true)
+                    else -> performSimpleAction(action)
+                }
+            }
+        )
+    }
+
+    if (optionKind != null) {
+        OptionPickerDialog(
+            title = if (optionKind == "model") "选择模型" else "选择工具",
+            values = optionValues,
+            onDismiss = { optionKind = null; optionValues = emptyList() },
+            onSelect = { value ->
+                val kind = optionKind ?: return@OptionPickerDialog
+                optionKind = null
+                optionValues = emptyList()
+                val provider = viewModel.selectedProvider
+                val targetSession = viewModel.session
+                scope.launch {
+                    val result = runtime.selectOption(targetSession, provider, kind, value)
+                    Toast.makeText(
+                        context,
+                        if (result == "ok" || result == "scheduled") "已选择：$value" else "选择失败：$value",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    delay(260)
+                    refreshCapabilities(openDialog = false)
+                }
+            }
+        )
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("删除当前官网会话？") },
+            text = { Text("AIHub 会调用当前 AI 网站的删除操作。网站可能还会显示自己的确认界面。") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmDelete = false
+                    performSimpleAction("deleteConversation", openWebAfter = true)
+                }) { Text("继续") }
+            },
+            dismissButton = { OutlinedButton(onClick = { confirmDelete = false }) { Text("取消") } }
+        )
+    }
+}
+
+@Composable
+private fun CapabilityDialog(
+    providerName: String,
+    capabilities: ProviderCapabilities?,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onRefresh: () -> Unit,
+    onModel: () -> Unit,
+    onTools: () -> Unit,
+    onAction: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$providerName 功能") },
+        text = {
+            if (loading || capabilities == null) {
+                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (capabilities.currentModel.isNotBlank()) {
+                        item {
+                            Text(
+                                "当前模型：${capabilities.currentModel}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (capabilities.error.isNotBlank()) {
+                        item { Text("页面提示：${capabilities.error}", color = MaterialTheme.colorScheme.error) }
+                    }
+                    if (!capabilities.hasAdvancedFeatures) {
+                        item { Text("当前页面暂未检测到可统一控制的高级功能。可以打开官网检查登录状态或页面结构。") }
+                    }
+                    if (capabilities.model) item { FeatureButton("模型选择", onModel) }
+                    if (capabilities.search) item { FeatureButton("联网搜索", { onAction("search") }) }
+                    if (capabilities.reasoning) item { FeatureButton("思考 / 推理", { onAction("reasoning") }) }
+                    if (capabilities.deepResearch) item { FeatureButton("深度研究", { onAction("deepResearch") }) }
+                    if (capabilities.imageGeneration) item { FeatureButton("图像生成", { onAction("imageGeneration") }) }
+                    if (capabilities.tools) item { FeatureButton("工具", onTools) }
+                    if (capabilities.retry) item { FeatureButton("重新生成", { onAction("retry") }) }
+                    if (capabilities.continueGeneration) item { FeatureButton("继续生成", { onAction("continue") }) }
+                    if (capabilities.copy) item { FeatureButton("复制最后回答", { onAction("copy") }) }
+                    if (capabilities.edit) item { FeatureButton("编辑上一条", { onAction("edit") }) }
+                    if (capabilities.history) item { FeatureButton("会话历史", { onAction("history") }) }
+                    if (capabilities.rename || capabilities.conversationMenu) item { FeatureButton("重命名会话", { onAction("rename") }) }
+                    if (capabilities.deleteConversation || capabilities.conversationMenu) item { FeatureButton("删除会话", { onAction("deleteConversation") }) }
+                    if (capabilities.voice) item { FeatureButton("语音", { onAction("voice") }) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        dismissButton = { TextButton(onClick = onRefresh, enabled = !loading) { Text("刷新") } }
+    )
+}
+
+@Composable
+private fun FeatureButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Text(label, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun OptionPickerDialog(
+    title: String,
+    values: List<String>,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(values, key = { it }) { value ->
+                    OutlinedButton(onClick = { onSelect(value) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(value, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable
@@ -375,7 +602,7 @@ private fun EmptyState() {
         Spacer(Modifier.height(18.dp))
         Text("一个入口，使用你的 AI 官网账号", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(6.dp))
-        Text("可直接发送文字、图片和文件；右上角网页按钮用于登录或特殊操作。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("支持文字、附件、模型和网站能力统一控制；右上角调节按钮显示当前 AI 可用功能。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
