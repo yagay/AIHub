@@ -22,15 +22,24 @@ import androidx.webkit.WebViewFeature
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.ProviderSpec
 import com.yagay.aihub.model.SessionKey
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.json.JSONTokener
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 class WebRuntime(private val context: Context) {
+    data class AttachmentAttachResult(
+        val attachedCount: Int,
+        val names: List<String>,
+        val failure: String? = null
+    )
+
     private val loader = ScriptLoader(context)
     private val webViews = linkedMapOf<String, WebView>()
+    private val attachmentBridges = linkedMapOf<String, NativeAttachmentBridge>()
     private var fileChooserLauncher: ((Intent) -> Unit)? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingFileProvider: String? = null
@@ -86,6 +95,71 @@ class WebRuntime(private val context: Context) {
         val result = call(session, provider, "isLoggedIn") == "true"
         DiagnosticLogger.d("WEB", "login_check provider=${provider.id} result=$result")
         return result
+    }
+
+    suspend fun attachFiles(
+        session: SessionKey,
+        provider: ProviderSpec,
+        uris: List<Uri>
+    ): AttachmentAttachResult {
+        if (uris.isEmpty()) return AttachmentAttachResult(0, emptyList(), "no-selection")
+        ensureLoaded(session, provider)
+        val key = webViewKey(session, provider)
+        val bridge = attachmentBridges[key]
+            ?: return AttachmentAttachResult(0, emptyList(), "bridge-unavailable")
+
+        val staged = runCatching {
+            withContext(Dispatchers.IO) { bridge.stage(uris) }
+        }.onFailure {
+            DiagnosticLogger.e("FILE", "attachment_stage_failed provider=${provider.id}", it)
+        }.getOrElse {
+            return AttachmentAttachResult(0, emptyList(), "stage-failed")
+        }
+
+        DiagnosticLogger.i(
+            "FILE",
+            "attachment_stage_ready provider=${provider.id} selected=${staged.names.size} totalBytes=${staged.totalBytes}"
+        )
+        if (staged.names.isEmpty()) {
+            bridge.clearNative()
+            return AttachmentAttachResult(0, emptyList(), "empty-stage")
+        }
+
+        var result = call(session, provider, "attachStagedFiles")
+        if (result == "no-input") {
+            val prepared = call(session, provider, "prepareAttachmentInput")
+            DiagnosticLogger.d("FILE", "attachment_prepare_input provider=${provider.id} result=${prepared ?: "null"}")
+            delay(350)
+            result = call(session, provider, "attachStagedFiles")
+            if (result == "no-input") {
+                delay(550)
+                result = call(session, provider, "attachStagedFiles")
+            }
+        }
+
+        val attachedCount = result
+            ?.takeIf { it.startsWith("attached:") }
+            ?.substringAfter(':')
+            ?.toIntOrNull()
+            ?: 0
+
+        val probe = call(session, provider, "attachmentProbe").orEmpty()
+        if (attachedCount > 0) {
+            val attachedNames = staged.names.take(attachedCount)
+            DiagnosticLogger.i(
+                "FILE",
+                "attachment_injected provider=${provider.id} attached=$attachedCount selected=${staged.names.size} probe=${DiagnosticLogger.scrub(probe).take(800)}"
+            )
+            bridge.clearNative()
+            return AttachmentAttachResult(attachedCount, attachedNames)
+        }
+
+        DiagnosticLogger.w(
+            "FILE",
+            "attachment_injection_failed provider=${provider.id} result=${result ?: "null"} probe=${DiagnosticLogger.scrub(probe).take(1000)}"
+        )
+        bridge.clearNative()
+        return AttachmentAttachResult(0, emptyList(), result ?: "null-result")
     }
 
     suspend fun openAttachmentPicker(session: SessionKey, provider: ProviderSpec): Boolean {
@@ -156,16 +230,22 @@ class WebRuntime(private val context: Context) {
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
         pendingFileProvider = null
+        attachmentBridges.values.forEach { it.clearNative() }
+        attachmentBridges.clear()
         webViews.values.forEach { webView ->
             (webView.parent as? ViewGroup)?.removeView(webView)
+            runCatching { webView.removeJavascriptInterface("AIHubNativeFiles") }
             webView.stopLoading()
             webView.destroy()
         }
         webViews.clear()
     }
 
+    private fun webViewKey(session: SessionKey, provider: ProviderSpec): String =
+        if (supportsMultiProfile) session.storageKey else provider.id
+
     private fun obtain(session: SessionKey, provider: ProviderSpec): WebView {
-        val key = if (supportsMultiProfile) session.storageKey else provider.id
+        val key = webViewKey(session, provider)
         return webViews.getOrPut(key) {
             DiagnosticLogger.i(
                 "WEB",
@@ -176,6 +256,11 @@ class WebRuntime(private val context: Context) {
                     runCatching { WebViewCompat.setProfile(this, session.webProfileName) }
                         .onFailure { DiagnosticLogger.e("WEB", "set_profile_failed provider=${provider.id}", it) }
                 }
+
+                val nativeAttachmentBridge = NativeAttachmentBridge(context.applicationContext)
+                attachmentBridges[key] = nativeAttachmentBridge
+                addJavascriptInterface(nativeAttachmentBridge, "AIHubNativeFiles")
+
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
