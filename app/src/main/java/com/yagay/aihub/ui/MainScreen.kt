@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material3.AlertDialog
@@ -85,6 +86,12 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     var prompt by remember { mutableStateOf("") }
     var showAddAccount by remember { mutableStateOf(false) }
 
+    val attachmentChooser = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        runtime.handleFileChooserResult(result.resultCode, result.data)
+    }
+
     val exportDiagnostics = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip")
     ) { uri ->
@@ -104,7 +111,13 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
         }
     }
 
-    DisposableEffect(Unit) { onDispose { runtime.destroy() } }
+    DisposableEffect(runtime) {
+        runtime.setFileChooserLauncher { intent -> attachmentChooser.launch(intent) }
+        onDispose {
+            runtime.setFileChooserLauncher(null)
+            runtime.destroy()
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -184,6 +197,32 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     prompt = prompt,
                     onPromptChange = { prompt = it },
                     isGenerating = viewModel.isGenerating,
+                    onAttach = {
+                        if (viewModel.isGenerating) return@ChatPane
+                        scope.launch {
+                            val provider = viewModel.selectedProvider
+                            val opened = runCatching {
+                                runtime.openAttachmentPicker(viewModel.session, provider)
+                            }.onFailure {
+                                DiagnosticLogger.e("FILE", "attachment_request_exception provider=${provider.id}", it)
+                            }.getOrDefault(false)
+
+                            if (!opened) {
+                                Toast.makeText(
+                                    context,
+                                    "${provider.name} 当前页面没有找到附件入口，已打开官网供你检查登录或附件功能。",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                viewModel.openWeb()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "选择文件或图片后会上传到 ${provider.name}，上传完成后再发送消息。",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    },
                     onSend = { val value = prompt; prompt = ""; viewModel.send(value, runtime) },
                     onStop = { viewModel.stop(runtime) }
                 )
@@ -202,7 +241,16 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
 }
 
 @Composable
-private fun ChatPane(messages: List<ChatMessage>, status: String?, prompt: String, onPromptChange: (String) -> Unit, isGenerating: Boolean, onSend: () -> Unit, onStop: () -> Unit) {
+private fun ChatPane(
+    messages: List<ChatMessage>,
+    status: String?,
+    prompt: String,
+    onPromptChange: (String) -> Unit,
+    isGenerating: Boolean,
+    onAttach: () -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit
+) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -218,6 +266,9 @@ private fun ChatPane(messages: List<ChatMessage>, status: String?, prompt: Strin
         }
         Surface(tonalElevation = 3.dp, shadowElevation = 6.dp, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
+                IconButton(onClick = onAttach, enabled = !isGenerating) {
+                    Icon(Icons.Outlined.AttachFile, "添加文件或图片")
+                }
                 TextField(
                     value = prompt,
                     onValueChange = onPromptChange,
@@ -261,7 +312,7 @@ private fun EmptyState() {
         Spacer(Modifier.height(18.dp))
         Text("一个入口，使用你的 AI 官网账号", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(6.dp))
-        Text("先点击右上角网页图标登录，然后直接在这里聊天。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("可直接发送文字、图片和文件；右上角网页按钮用于登录或特殊操作。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -285,7 +336,7 @@ private fun WebHost(runtime: WebRuntime, viewModel: AIHubViewModel, visible: Boo
                     IconButton(onClick = { viewModel.closeWeb() }) { Icon(Icons.Default.ArrowBack, "返回聊天") }
                     Column(Modifier.weight(1f)) {
                         Text("${viewModel.selectedProvider.name} · ${viewModel.selectedAccount.label}", fontWeight = FontWeight.SemiBold)
-                        Text("在官方网页完成登录或特殊操作", style = MaterialTheme.typography.labelSmall)
+                        Text("在官方网页完成登录、附件或特殊操作", style = MaterialTheme.typography.labelSmall)
                     }
                     Button(onClick = { viewModel.closeWeb() }) { Text("返回聊天") }
                 }
