@@ -29,8 +29,15 @@
     if (!isVisible(node)) return false;
     if (node.disabled) return false;
     if (node.getAttribute?.("aria-disabled") === "true") return false;
+    if (node.classList?.contains("ds-button--disabled")) return false;
     return true;
   }) || null;
+
+  const editorText = (element) => {
+    if (!element) return "";
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value || "";
+    return element.innerText || element.textContent || "";
+  };
 
   const setEditorText = (element, text) => {
     element.focus();
@@ -147,6 +154,8 @@
     return responseViaCopyButton();
   };
 
+  const sendResult = () => cfg.verifySubmission ? "verify" : "ok";
+
   window.__AIHUB__ = {
     isLoggedIn() {
       return !!firstVisible(cfg.inputSelectors) || !!firstVisible(cfg.loggedInSelectors);
@@ -160,7 +169,7 @@
       const immediate = firstUsable(cfg.sendSelectors);
       if (immediate) {
         immediate.click();
-        return "ok";
+        return sendResult();
       }
 
       let submitted = false;
@@ -178,7 +187,14 @@
           }
         }, delay);
       });
-      return "ok";
+      return sendResult();
+    },
+
+    submissionAcknowledged() {
+      const editor = firstVisible(cfg.inputSelectors);
+      const inputChars = editor ? editorText(editor).trim().length : 0;
+      const responses = responseNodes().length;
+      return !editor || inputChars === 0 || responses > 0;
     },
 
     extractLastResponse() {
@@ -207,10 +223,12 @@
       const turns = all(cfg.turnSelectors);
       const assistants = all(cfg.assistantMarkerSelectors);
       const copyButtons = all(cfg.copyButtonSelectors);
+      const editor = firstVisible(cfg.inputSelectors);
       return {
         viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
         inputCount: all(cfg.inputSelectors).length,
-        visibleInput: nodeSummary(firstVisible(cfg.inputSelectors)),
+        inputChars: editor ? editorText(editor).trim().length : 0,
+        visibleInput: nodeSummary(editor),
         loggedInMarkerCount: all(cfg.loggedInSelectors).length,
         sendCount: all(cfg.sendSelectors).length,
         visibleSend: nodeSummary(firstVisible(cfg.sendSelectors)),
