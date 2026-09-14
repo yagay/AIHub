@@ -1,5 +1,6 @@
 name: One-shot KernelSU root detection fix
 
+# trigger v2
 on:
   push:
     branches: ['refactor/titanium-extension']
