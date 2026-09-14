@@ -1,5 +1,5 @@
 const BROKER = "ws://127.0.0.1:3847/bridge";
-const WORKER_MARKER = "AIHUB_BRIDGE_WORKER_V6";
+const WORKER_MARKER = "AIHUB_BRIDGE_WORKER_V7";
 const PROVIDER_URLS = [
   "*://chatgpt.com/*",
   "*://chat.openai.com/*",
