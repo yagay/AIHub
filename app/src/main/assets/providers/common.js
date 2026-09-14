@@ -1,6 +1,7 @@
 (() => {
   const cfg = window.__AIHUB_CONFIG__ || {};
   const sendState = window.__AIHUB_SEND_STATE__ || (window.__AIHUB_SEND_STATE__ = {});
+  const attachmentState = window.__AIHUB_ATTACHMENT_STATE__ || (window.__AIHUB_ATTACHMENT_STATE__ = {});
 
   const all = (selectors) => {
     const seen = new Set();
@@ -33,6 +34,13 @@
     if (node.classList?.contains("ds-button--disabled")) return false;
     return true;
   }) || null;
+
+  const sendProbeSelectors = () => cfg.sendProbeSelectors || cfg.sendSelectors || [];
+  const recentAttachment = () => {
+    const at = Number(attachmentState.lastAttachedAt || 0);
+    const count = Number(attachmentState.lastAttachedCount || 0);
+    return count > 0 && at > 0 && Date.now() - at < 45000;
+  };
 
   const editorText = (element) => {
     if (!element) return "";
@@ -101,6 +109,10 @@
       role: node.getAttribute?.("role") || "",
       testid: node.getAttribute?.("data-testid") || "",
       author: node.getAttribute?.("data-message-author-role") || node.getAttribute?.("data-turn") || "",
+      aria: node.getAttribute?.("aria-label") || "",
+      ariaDisabled: node.getAttribute?.("aria-disabled") || "",
+      disabled: !!node.disabled,
+      classes: typeof node.className === "string" ? node.className.split(/\s+/).filter(Boolean).slice(0, 10) : [],
       width: Math.round(rect.width),
       height: Math.round(rect.height)
     };
@@ -161,21 +173,32 @@
     const inputChars = editor ? editorText(editor).trim().length : 0;
     const responses = responseNodes().length;
     const turns = turnNodes().length;
-    const generating = !!firstVisible(cfg.stopSelectors);
+    const rawGenerating = !!firstVisible(cfg.stopSelectors);
     const pathChanged = !!sendState.path && location.pathname !== sendState.path;
     const responseGrowth = responses > Number(sendState.responses || 0);
     const turnGrowth = turns > Number(sendState.turns || 0);
     const inputCleared = Number(sendState.submittedChars || 0) > 0 && inputChars === 0;
+    const generating = cfg.ambiguousStopSelector ? (rawGenerating && (pathChanged || responseGrowth || turnGrowth)) : rawGenerating;
+    const sendVisibleNode = firstVisible(sendProbeSelectors());
+    const sendUsableNode = firstUsable(cfg.sendSelectors);
     return {
       acknowledged: !!(pathChanged || responseGrowth || turnGrowth || generating || inputCleared),
       pathChanged,
       responseGrowth,
       turnGrowth,
       generating,
+      rawGenerating,
       inputCleared,
       inputChars,
       responses,
       turns,
+      sendVisible: !!sendVisibleNode,
+      sendUsable: !!sendUsableNode,
+      sendCandidate: nodeSummary(sendVisibleNode),
+      attachmentOnly: !!sendState.attachmentOnly,
+      recentAttachment: recentAttachment(),
+      lastAttachedCount: Number(attachmentState.lastAttachedCount || 0),
+      lastAttachedAgeMs: attachmentState.lastAttachedAt ? Math.max(0, Date.now() - Number(attachmentState.lastAttachedAt)) : -1,
       elapsedMs: sendState.startedAt ? Date.now() - sendState.startedAt : -1,
       clickStrategy: sendState.clickStrategy || "",
       submittedChars: Number(sendState.submittedChars || 0)
@@ -193,15 +216,24 @@
       const editor = firstVisible(cfg.inputSelectors);
       if (!editor) return "no-input";
 
+      const submittedText = String(text || "");
+      const submittedChars = submittedText.trim().length;
+      const attachmentOnly = submittedChars === 0 && recentAttachment();
+
       sendState.path = location.pathname;
       sendState.responses = responseNodes().length;
       sendState.turns = turnNodes().length;
       sendState.bodyChars = (document.body?.innerText || "").length;
-      sendState.submittedChars = String(text || "").trim().length;
+      sendState.submittedChars = submittedChars;
+      sendState.attachmentOnly = attachmentOnly;
       sendState.startedAt = Date.now();
       sendState.clickStrategy = "";
 
-      if (!setEditorText(editor, text)) return "input-failed";
+      if (submittedChars > 0) {
+        if (!setEditorText(editor, submittedText)) return "input-failed";
+      } else {
+        try { editor.focus(); } catch (_) {}
+      }
 
       const immediate = firstUsable(cfg.sendSelectors);
       if (immediate) {
@@ -211,8 +243,11 @@
       }
 
       let submitted = false;
-      sendState.clickStrategy = "delayed-search";
-      const delays = [120, 280, 520, 900];
+      sendState.clickStrategy = attachmentOnly ? "waiting-attachment-button" : "delayed-search";
+      const delays = attachmentOnly
+        ? [120, 350, 700, 1200, 2000, 3500, 5500, 8000, 12000]
+        : [120, 280, 520, 900, 1500, 2500];
+
       delays.forEach((delay, index) => {
         setTimeout(() => {
           if (submitted) return;
@@ -223,8 +258,12 @@
             delayed.click();
           } else if (index === delays.length - 1) {
             submitted = true;
-            sendState.clickStrategy = "enter-fallback";
-            pressEnter(editor);
+            if (submittedChars > 0) {
+              sendState.clickStrategy = "enter-fallback";
+              pressEnter(editor);
+            } else {
+              sendState.clickStrategy = "attachment-button-timeout";
+            }
           }
         }, delay);
       });
@@ -243,7 +282,12 @@
       return extractResponse();
     },
 
-    isGenerating() { return !!firstVisible(cfg.stopSelectors); },
+    isGenerating() {
+      const raw = !!firstVisible(cfg.stopSelectors);
+      if (!cfg.ambiguousStopSelector) return raw;
+      if (!raw) return false;
+      return location.pathname !== (cfg.homePath || "/") && (turnNodes().length > 0 || responseNodes().length > 0);
+    },
 
     stop() {
       const stop = firstUsable(cfg.stopSelectors);
@@ -266,6 +310,7 @@
       const assistants = all(cfg.assistantMarkerSelectors);
       const copyButtons = all(cfg.copyButtonSelectors);
       const editor = firstVisible(cfg.inputSelectors);
+      const sendCandidates = all(sendProbeSelectors());
       return {
         viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
         inputCount: all(cfg.inputSelectors).length,
@@ -273,7 +318,10 @@
         visibleInput: nodeSummary(editor),
         loggedInMarkerCount: all(cfg.loggedInSelectors).length,
         sendCount: all(cfg.sendSelectors).length,
+        sendCandidateCount: sendCandidates.length,
         visibleSend: nodeSummary(firstVisible(cfg.sendSelectors)),
+        visibleSendCandidate: nodeSummary(sendCandidates.find(isVisible) || null),
+        usableSend: nodeSummary(firstUsable(cfg.sendSelectors)),
         responseCount: responses.length,
         extractedChars: extracted.length,
         turnCount: turns.length,
