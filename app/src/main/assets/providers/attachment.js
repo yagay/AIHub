@@ -52,36 +52,66 @@
     return null;
   };
 
-  const clickUploadMenuItem = () => {
-    const candidates = Array.from(document.querySelectorAll("button, [role='menuitem'], [role='option'], [role='button']"));
-    const rx = /(upload|attach|add\s+(photos?|files?)|photos?\s*&\s*files?|上传|附件|添加图片|添加文件|图片|文件)/i;
-    const item = candidates.find((node) => visible(node) && rx.test((node.innerText || node.textContent || node.getAttribute?.("aria-label") || "").trim()));
-    if (!item) return false;
-    item.click();
-    return true;
+  const b64ToBytes = (value) => {
+    const raw = atob(value || "");
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return bytes;
   };
 
-  const clickBestInput = () => {
-    const input = bestFileInput();
-    if (!input) return false;
-    input.click();
-    return true;
-  };
-
-  api.openAttachmentPicker = () => {
-    if (clickBestInput()) return "opened-input";
-
+  api.prepareAttachmentInput = () => {
+    if (bestFileInput()) return "ready";
     const button = findAttachmentButton();
     if (!button) return "not-found";
     button.click();
+    return "opened-menu";
+  };
 
-    [80, 180, 350, 650].forEach((delay) => {
-      setTimeout(() => {
-        if (clickBestInput()) return;
-        clickUploadMenuItem();
-        setTimeout(() => { clickBestInput(); }, 80);
-      }, delay);
-    });
+  api.attachStagedFiles = () => {
+    const bridge = window.AIHubNativeFiles;
+    if (!bridge || typeof bridge.count !== "function") return "no-bridge";
+
+    const input = bestFileInput();
+    if (!input) return "no-input";
+
+    const total = Number(bridge.count()) || 0;
+    if (total <= 0) return "no-files";
+
+    const data = new DataTransfer();
+    const max = input.multiple ? total : Math.min(total, 1);
+
+    for (let i = 0; i < max; i++) {
+      const parts = [];
+      const chunks = Number(bridge.chunkCount(i)) || 0;
+      for (let part = 0; part < chunks; part++) {
+        const encoded = bridge.chunk(i, part);
+        if (encoded) parts.push(b64ToBytes(encoded));
+      }
+      const name = String(bridge.name(i) || `attachment-${i + 1}`);
+      const mime = String(bridge.mime(i) || "application/octet-stream");
+      data.items.add(new File(parts, name, { type: mime, lastModified: Date.now() }));
+    }
+
+    try {
+      input.files = data.files;
+    } catch (_) {
+      return "assign-failed";
+    }
+
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    return `attached:${data.files.length}`;
+  };
+
+  api.openAttachmentPicker = () => {
+    const input = bestFileInput();
+    if (input) {
+      input.click();
+      return "opened-input";
+    }
+    const button = findAttachmentButton();
+    if (!button) return "not-found";
+    button.click();
     return "opened-button";
   };
 
@@ -92,6 +122,8 @@
       accepts: inputs.slice(0, 6).map((input) => input.accept || "*/*"),
       multiples: inputs.slice(0, 6).map((input) => !!input.multiple),
       visibleAttachmentButton: !!findAttachmentButton(),
+      bridgeAvailable: !!window.AIHubNativeFiles,
+      stagedCount: window.AIHubNativeFiles?.count?.() || 0,
       path: location.pathname
     };
   };
