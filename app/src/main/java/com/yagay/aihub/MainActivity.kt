@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.ui.AIHubRoot
 import com.yagay.aihub.ui.AIHubViewModel
 import com.yagay.aihub.ui.theme.AIHubTheme
@@ -13,6 +14,7 @@ import com.yagay.aihub.web.WebRuntime
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DiagnosticLogger.i("ACTIVITY", "MainActivity.onCreate restored=${savedInstanceState != null}")
         enableEdgeToEdge()
         setContent {
             AIHubTheme {
