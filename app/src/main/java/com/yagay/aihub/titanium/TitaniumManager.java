@@ -40,6 +40,7 @@ public final class TitaniumManager {
     private String titaniumDataDir;
     private String externalExtensionsDir;
     private String extensionId;
+    private String extensionBuildId;
 
     public TitaniumManager(Context context) {
         this.context = context.getApplicationContext();
@@ -83,6 +84,7 @@ public final class TitaniumManager {
         copyAssets("titanium-extension", source);
 
         String expectedBuild = readAssetText("titanium-extension/" + BUILD_ID_FILE).trim();
+        extensionBuildId = expectedBuild;
         extensionId = readAssetText("titanium-extension/" + EXTENSION_ID_FILE).trim();
         if (expectedBuild.isEmpty()) throw new IllegalStateException("APK 内扩展 build marker 缺失");
         if (!extensionId.matches("[a-p]{32}")) {
@@ -171,14 +173,11 @@ public final class TitaniumManager {
     }
 
     private boolean isExtensionRegistered() throws Exception {
-        String command = "for p in " + q(titaniumDataDir + "/app_chrome")
-                + "/*/Preferences " + q(titaniumDataDir + "/app_chrome")
-                + "/*/'Secure Preferences'; do "
-                + "[ -f \"$p\" ] && grep -q -F " + q(extensionId)
-                + " \"$p\" 2>/dev/null && { echo yes; exit 0; }; done; "
-                + "for x in " + q(titaniumDataDir + "/app_chrome")
-                + "/*/Extensions/" + extensionId + "; do "
-                + "[ -d \"$x\" ] && { echo yes; exit 0; }; done; true";
+        if (extensionBuildId == null || extensionBuildId.isEmpty()) return false;
+        String command = "for x in " + q(titaniumDataDir + "/app_chrome")
+                + "/*/Extensions/" + extensionId + "/*/" + BUILD_ID_FILE + "; do "
+                + "[ -f \"$x\" ] && [ \"$(cat \"$x\" 2>/dev/null)\" = " + q(extensionBuildId)
+                + " ] && { echo yes; exit 0; }; done; true";
         return "yes".equals(runSu(command, 8).trim());
     }
 
