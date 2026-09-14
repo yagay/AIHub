@@ -37,6 +37,7 @@ object DiagnosticLogger {
     @Volatile
     private var appContext: Context? = null
     private var sessionId: String = ""
+    private val noiseCounts = mutableMapOf<String, Int>()
 
     fun init(context: Context) {
         if (appContext != null) return
@@ -45,8 +46,10 @@ object DiagnosticLogger {
                 appContext = context.applicationContext
                 val dir = ensureDir()
                 sessionId = UUID.randomUUID().toString().take(12)
+                noiseCounts.clear()
                 File(dir, "current-session.log").delete()
                 File(dir, "web-snapshots.jsonl").delete()
+                File(dir, "web-snapshots.jsonl.1").delete()
             }
         }
         i(
@@ -102,6 +105,7 @@ object DiagnosticLogger {
                 "aihub.log", "aihub.log.1", "current-session.log",
                 "web-snapshots.jsonl", "web-snapshots.jsonl.1"
             ).forEach { File(dir, it).delete() }
+            noiseCounts.clear()
         }
         i("APP", "diagnostic_log_cleared")
     }
@@ -159,7 +163,18 @@ object DiagnosticLogger {
 
     private fun write(level: String, tag: String, message: String, throwable: Throwable?) {
         val ctx = appContext ?: return
-        val safeMessage = scrub(message.replace('\u0000', ' '))
+        val noiseKind = if (tag == "CONSOLE") consoleNoiseKind(message) else null
+        val effectiveMessage = if (noiseKind != null) {
+            val count = synchronized(lock) {
+                val next = (noiseCounts[noiseKind] ?: 0) + 1
+                noiseCounts[noiseKind] = next
+                next
+            }
+            if (count != 1 && count % 25 != 0) return
+            "console_noise kind=$noiseKind count=$count"
+        } else message
+
+        val safeMessage = scrub(effectiveMessage.replace('\u0000', ' '))
         val safeTag = tag.replace(Regex("[^A-Za-z0-9_.-]"), "_").take(40)
         val line = buildString {
             append(synchronized(lock) { timestampFormat.format(Date()) })
@@ -196,6 +211,11 @@ object DiagnosticLogger {
             "I" -> Log.i("$TAG_PREFIX/$safeTag", safeMessage)
             else -> Log.d("$TAG_PREFIX/$safeTag", safeMessage)
         }
+    }
+
+    private fun consoleNoiseKind(message: String): String? = when {
+        message.contains("preloaded using link preload but not used", ignoreCase = true) -> "preload-unused"
+        else -> null
     }
 
     private fun ensureDir(): File {
@@ -253,6 +273,9 @@ object DiagnosticLogger {
         appendLine("runtimeMaxMemory=${runtime.maxMemory()}")
         appendLine("runtimeTotalMemory=${runtime.totalMemory()}")
         appendLine("runtimeFreeMemory=${runtime.freeMemory()}")
+        synchronized(lock) {
+            noiseCounts.toSortedMap().forEach { (kind, count) -> appendLine("consoleNoise.$kind=$count") }
+        }
         appendLine("pid=${Process.myPid()}")
     }
 
