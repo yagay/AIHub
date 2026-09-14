@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.yagay.aihub.data.AccountStore
+import com.yagay.aihub.data.ConversationBindingStore
 import com.yagay.aihub.data.ConversationStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.AccountProfile
@@ -27,6 +28,7 @@ import kotlinx.coroutines.launch
 class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     private val accountStore = AccountStore(application)
     private val conversationStore = ConversationStore(application)
+    private val bindingStore = ConversationBindingStore(application)
 
     val providers = ProviderCatalog.all
     var accounts by mutableStateOf(accountStore.loadAll())
@@ -39,8 +41,6 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     var showWeb by mutableStateOf(false)
         private set
 
-    // Generation state is session-scoped. This lets ChatGPT keep polling in the
-    // background while the user switches to Gemini/Claude/etc. and starts more work.
     private val generatingSessions = mutableStateMapOf<String, Boolean>()
     private val sessionStatuses = mutableStateMapOf<String, String?>()
     private val unreadSessions = mutableStateMapOf<String, Boolean>()
@@ -52,12 +52,20 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val selectedProvider get() = ProviderCatalog.byId(selectedProviderId)
-    val selectedAccount: AccountProfile get() = accounts.firstOrNull { it.id == selectedAccountId } ?: defaultAccount(selectedProviderId)
+    val selectedAccount: AccountProfile
+        get() = accounts.firstOrNull { it.id == selectedAccountId } ?: defaultAccount(selectedProviderId)
     val session: SessionKey get() = SessionKey(selectedProviderId, selectedAccount.id)
     val isGenerating: Boolean get() = isSessionGenerating(session)
     val status: String? get() = sessionStatuses[session.storageKey]
 
     fun accountsFor(providerId: String) = accounts.filter { it.providerId == providerId }
+
+    fun preferredWebUrl(): String? = bindingStore.loadUrl(session)
+
+    fun onWebPageChanged(target: SessionKey, provider: ProviderSpec, url: String) {
+        if (target.providerId != provider.id) return
+        bindingStore.saveUrl(target, url)
+    }
 
     fun isSessionGenerating(providerId: String, accountId: String): Boolean =
         generatingSessions[SessionKey(providerId, accountId).storageKey] == true
@@ -89,6 +97,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         selectedAccountId = account.id
         messages.clear()
         unreadSessions[session.storageKey] = false
+        bindingStore.clear(session)
         showWeb = true
         DiagnosticLogger.i("VM", "account_added provider=$selectedProviderId account=${safeAccountId(account.id)}")
         setStatus(session, "请登录 ${selectedProvider.name} 的新账号")
@@ -135,12 +144,15 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 DiagnosticLogger.w("CHAT", "login_preflight_false provider=${provider.id} action=try_send_anyway")
             }
 
-            val baselineResponse = responseBaseline(runtime, currentSession, provider)
+            val baseline = responseBaseline(runtime, currentSession, provider)
             val sent = runCatching { runtime.send(currentSession, provider, text) }
                 .onFailure { DiagnosticLogger.e("CHAT", "send_exception provider=${provider.id}", it) }
                 .getOrDefault(false)
             if (!sent) {
-                DiagnosticLogger.w("CHAT", "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint attachments=$attachmentCount")
+                DiagnosticLogger.w(
+                    "CHAT",
+                    "send_failed provider=${provider.id} reason=adapter_or_dom loginHint=$loggedInHint attachments=$attachmentCount"
+                )
                 setGenerating(currentSession, false)
                 if (isCurrentSession(currentSession)) showWeb = true
                 setStatus(
@@ -148,19 +160,23 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     if (!loggedInHint) {
                         "没有找到 ${provider.name} 的聊天输入框。请在网页中确认已登录，然后返回重试。"
                     } else {
-                        "网页结构可能已经变化，未找到输入框或发送按钮。"
+                        "消息没有被官网确认提交。请打开官网检查附件、限额或页面状态。"
                     }
                 )
                 return@launchGeneration
             }
 
-            DiagnosticLogger.i("CHAT", "send_injected provider=${provider.id} loginHint=$loggedInHint attachments=$attachmentCount")
+            runtime.currentUrl(currentSession, provider)?.let { bindingStore.saveUrl(currentSession, it) }
+            DiagnosticLogger.i(
+                "CHAT",
+                "send_injected provider=${provider.id} loginHint=$loggedInHint attachments=$attachmentCount"
+            )
             setStatus(currentSession, "等待 ${provider.name} 回复…")
             awaitProviderResponse(
                 runtime = runtime,
                 currentSession = currentSession,
                 provider = provider,
-                baselineResponse = baselineResponse,
+                baseline = baseline,
                 replaceLastAssistant = false,
                 source = "send"
             )
@@ -175,9 +191,15 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
         if (generationAction) {
             launchGeneration(currentSession) {
-                val baselineResponse = responseBaseline(runtime, currentSession, provider)
+                val baseline = responseBaseline(runtime, currentSession, provider)
                 val result = runCatching { runtime.performAction(currentSession, provider, action) }
-                    .onFailure { DiagnosticLogger.e("CAP", "provider_action_exception provider=${provider.id} action=$action", it) }
+                    .onFailure {
+                        DiagnosticLogger.e(
+                            "CAP",
+                            "provider_action_exception provider=${provider.id} action=$action",
+                            it
+                        )
+                    }
                     .getOrDefault("")
 
                 if (result != "ok" && result != "scheduled") {
@@ -191,7 +213,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                     runtime = runtime,
                     currentSession = currentSession,
                     provider = provider,
-                    baselineResponse = baselineResponse,
+                    baseline = baseline,
                     replaceLastAssistant = true,
                     source = "action:$action"
                 )
@@ -201,7 +223,13 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             val result = runCatching { runtime.performAction(currentSession, provider, action) }
-                .onFailure { DiagnosticLogger.e("CAP", "provider_action_exception provider=${provider.id} action=$action", it) }
+                .onFailure {
+                    DiagnosticLogger.e(
+                        "CAP",
+                        "provider_action_exception provider=${provider.id} action=$action",
+                        it
+                    )
+                }
                 .getOrDefault("")
 
             if (result != "ok" && result != "scheduled") {
@@ -211,6 +239,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
             if (action == "deleteConversation") {
                 conversationStore.clear(currentSession)
+                bindingStore.clear(currentSession)
                 unreadSessions[currentSession.storageKey] = false
                 if (isCurrentSession(currentSession)) messages.clear()
             }
@@ -222,7 +251,10 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         val currentSession = session
         val provider = selectedProvider
         viewModelScope.launch {
-            DiagnosticLogger.i("CHAT", "stop_requested provider=${provider.id} account=${safeAccountId(currentSession.accountId)}")
+            DiagnosticLogger.i(
+                "CHAT",
+                "stop_requested provider=${provider.id} account=${safeAccountId(currentSession.accountId)}"
+            )
             generationJobs.remove(currentSession.storageKey)?.cancel()
             runtime.stop(currentSession, provider)
             setGenerating(currentSession, false)
@@ -237,9 +269,13 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val provider = selectedProvider
-        DiagnosticLogger.i("CHAT", "new_chat provider=${provider.id} account=${safeAccountId(current.accountId)}")
+        DiagnosticLogger.i(
+            "CHAT",
+            "new_chat provider=${provider.id} account=${safeAccountId(current.accountId)}"
+        )
         messages.clear()
         conversationStore.clear(current)
+        bindingStore.clear(current)
         unreadSessions[current.storageKey] = false
         viewModelScope.launch {
             runtime.newChat(current, provider)
@@ -259,11 +295,23 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun responseBaseline(runtime: WebRuntime, currentSession: SessionKey, provider: ProviderSpec): String {
-        val baseline = runCatching { runtime.lastResponse(currentSession, provider) }
-            .onFailure { DiagnosticLogger.w("CHAT", "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}") }
-            .getOrDefault("")
-        DiagnosticLogger.d("CHAT", "response_baseline provider=${provider.id} chars=${baseline.length}")
+    private suspend fun responseBaseline(
+        runtime: WebRuntime,
+        currentSession: SessionKey,
+        provider: ProviderSpec
+    ): WebRuntime.ResponseSnapshot {
+        val baseline = runCatching { runtime.responseSnapshot(currentSession, provider) }
+            .onFailure {
+                DiagnosticLogger.w(
+                    "CHAT",
+                    "response_baseline_error provider=${provider.id} type=${it.javaClass.simpleName}"
+                )
+            }
+            .getOrDefault(WebRuntime.ResponseSnapshot())
+        DiagnosticLogger.d(
+            "CHAT",
+            "response_baseline provider=${provider.id} chars=${baseline.text.length} key=${baseline.key.takeLast(40)} responses=${baseline.responseCount} turns=${baseline.turnCount} path=${baseline.path}"
+        )
         return baseline
     }
 
@@ -271,74 +319,90 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         runtime: WebRuntime,
         currentSession: SessionKey,
         provider: ProviderSpec,
-        baselineResponse: String,
+        baseline: WebRuntime.ResponseSnapshot,
         replaceLastAssistant: Boolean,
         source: String
     ) {
-        var last = ""
+        var last = WebRuntime.ResponseSnapshot()
         var stableCount = 0
         var sawGenerating = false
-        var idleAfterGenerating = 0
+        var idlePolls = 0
         var staleLogged = false
 
         for (poll in 0 until 180) {
             delay(700)
-            val response = runCatching { runtime.lastResponse(currentSession, provider) }
-                .onFailure { DiagnosticLogger.w("CHAT", "response_poll_error provider=${provider.id} poll=$poll source=$source type=${it.javaClass.simpleName}") }
-                .getOrDefault("")
-            val generating = runCatching { runtime.isGenerating(currentSession, provider) }.getOrDefault(false)
-            val changedFromBaseline = response.isNotBlank() && response != baselineResponse
+            val snap = runCatching { runtime.responseSnapshot(currentSession, provider) }
+                .onFailure {
+                    DiagnosticLogger.w(
+                        "CHAT",
+                        "response_poll_error provider=${provider.id} poll=$poll source=$source type=${it.javaClass.simpleName}"
+                    )
+                }
+                .getOrDefault(WebRuntime.ResponseSnapshot())
 
+            val generating = snap.isGenerating
             if (generating) {
                 sawGenerating = true
-                idleAfterGenerating = 0
-            } else if (sawGenerating && !changedFromBaseline) {
-                idleAfterGenerating++
-            } else {
-                idleAfterGenerating = 0
+                idlePolls = 0
+            } else if (sawGenerating) {
+                idlePolls++
             }
 
-            val identicalAfterGeneration = response.isNotBlank() &&
-                response == baselineResponse &&
-                sawGenerating &&
-                !generating &&
-                idleAfterGenerating >= 3
-            val freshResponse = changedFromBaseline || identicalAfterGeneration
+            val structuralChange = snap.key.isNotBlank() && snap.key != baseline.key ||
+                snap.responseCount > baseline.responseCount ||
+                snap.turnCount > baseline.turnCount ||
+                (baseline.path.isNotBlank() && snap.path.isNotBlank() && snap.path != baseline.path)
+            val textChange = snap.text.isNotBlank() && snap.text != baseline.text
+            val sameTextGenerationAction = replaceLastAssistant &&
+                snap.text.isNotBlank() && sawGenerating && !generating && idlePolls >= 2
+            val freshResponse = snap.text.isNotBlank() && (structuralChange || textChange || sameTextGenerationAction)
 
-            if (!freshResponse && response.isNotBlank() && !staleLogged) {
+            if (!freshResponse && snap.text.isNotBlank() && !staleLogged) {
                 staleLogged = true
                 DiagnosticLogger.d(
                     "CHAT",
-                    "stale_response_ignored provider=${provider.id} poll=$poll source=$source chars=${response.length} baselineChars=${baselineResponse.length}"
+                    "stale_response_ignored provider=${provider.id} poll=$poll source=$source chars=${snap.text.length} key=${snap.key.takeLast(40)} baselineChars=${baseline.text.length} baselineKey=${baseline.key.takeLast(40)}"
                 )
             }
 
-            if (poll == 0 || poll == 4 || poll == 10 || poll == 20) {
+            if (poll == 0 || poll == 4 || poll == 10 || poll == 20 || poll == 40) {
                 DiagnosticLogger.d(
                     "CHAT",
-                    "response_poll provider=${provider.id} poll=$poll source=$source responseChars=${response.length} generating=$generating fresh=$freshResponse baselineMatch=${response.isNotBlank() && response == baselineResponse} background=${!isCurrentSession(currentSession)}"
+                    "response_poll provider=${provider.id} poll=$poll source=$source state=${snap.state} reason=${snap.reason} responseChars=${snap.text.length} fresh=$freshResponse keyChanged=${snap.key != baseline.key} responseGrowth=${snap.responseCount > baseline.responseCount} turnGrowth=${snap.turnCount > baseline.turnCount} background=${!isCurrentSession(currentSession)}"
                 )
-                if (response.isBlank() || !freshResponse) {
+                if (snap.text.isBlank() || !freshResponse) {
                     val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
                     if (probe.isNotBlank()) {
                         DiagnosticLogger.d(
                             "CHAT",
-                            "dom_probe provider=${provider.id} poll=$poll source=$source summary=${DiagnosticLogger.scrub(probe).take(1400)}"
+                            "dom_probe provider=${provider.id} poll=$poll source=$source summary=${DiagnosticLogger.scrub(probe).take(1800)}"
                         )
                     }
                 }
             }
 
+            if (snap.state == "error") {
+                setGenerating(currentSession, false)
+                setStatus(currentSession, "${provider.name} 官网没有完成消息提交。请打开官网检查附件或页面提示。")
+                DiagnosticLogger.w(
+                    "CHAT",
+                    "generation_state_error provider=${provider.id} source=$source reason=${snap.reason}"
+                )
+                return
+            }
+
             if (freshResponse) {
-                if (response == last) stableCount++ else stableCount = 0
-                last = response
+                val sameSnapshot = snap.key == last.key && snap.text == last.text
+                stableCount = if (sameSnapshot) stableCount + 1 else 0
+                last = snap
                 if (!generating && stableCount >= 2) {
-                    commitAssistantResponse(response, currentSession, replaceLastAssistant)
+                    commitAssistantResponse(snap.text, currentSession, replaceLastAssistant)
+                    runtime.currentUrl(currentSession, provider)?.let { bindingStore.saveUrl(currentSession, it) }
                     setGenerating(currentSession, false)
                     setStatus(currentSession, null)
                     DiagnosticLogger.i(
                         "CHAT",
-                        "response_completed provider=${provider.id} source=$source responseChars=${response.length} polls=${poll + 1} baselineChars=${baselineResponse.length} background=${!isCurrentSession(currentSession)}"
+                        "response_completed provider=${provider.id} source=$source responseChars=${snap.text.length} key=${snap.key.takeLast(40)} polls=${poll + 1} background=${!isCurrentSession(currentSession)}"
                     )
                     return
                 }
@@ -346,11 +410,11 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 stableCount = 0
             }
 
-            if (sawGenerating && idleAfterGenerating >= 8 && last.isBlank() && response.isBlank()) {
+            if (sawGenerating && idlePolls >= 8 && last.text.isBlank() && snap.text.isBlank()) {
                 val probe = runCatching { runtime.probeSummary(currentSession, provider) }.getOrDefault("")
                 DiagnosticLogger.w(
                     "CHAT",
-                    "response_extract_failed provider=${provider.id} poll=$poll source=$source probe=${DiagnosticLogger.scrub(probe).take(1400)}"
+                    "response_extract_failed provider=${provider.id} poll=$poll source=$source state=${snap.state} reason=${snap.reason} probe=${DiagnosticLogger.scrub(probe).take(1800)}"
                 )
                 setGenerating(currentSession, false)
                 setStatus(currentSession, "${provider.name} 已完成回复，但 AIHub 没有识别到回答。请导出诊断日志。")
@@ -358,23 +422,31 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        if (last.isNotBlank()) {
-            commitAssistantResponse(last, currentSession, replaceLastAssistant)
+        if (last.text.isNotBlank()) {
+            commitAssistantResponse(last.text, currentSession, replaceLastAssistant)
+            runtime.currentUrl(currentSession, provider)?.let { bindingStore.saveUrl(currentSession, it) }
         }
         setGenerating(currentSession, false)
-        setStatus(currentSession, if (last.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null)
+        setStatus(currentSession, if (last.text.isBlank()) "没有读取到新的回复，可打开网页检查当前状态。" else null)
         DiagnosticLogger.w(
             "CHAT",
-            "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.length} baselineChars=${baselineResponse.length}"
+            "response_timeout provider=${provider.id} source=$source lastResponseChars=${last.text.length} lastKey=${last.key.takeLast(40)} baselineChars=${baseline.text.length}"
         )
     }
 
-    private fun commitAssistantResponse(text: String, target: SessionKey, replaceLastAssistant: Boolean) {
+    private fun commitAssistantResponse(
+        text: String,
+        target: SessionKey,
+        replaceLastAssistant: Boolean
+    ) {
         val targetMessages = conversationStore.load(target).toMutableList()
         if (replaceLastAssistant) {
             val index = targetMessages.indexOfLast { it.role == MessageRole.ASSISTANT }
             if (index >= 0) {
-                targetMessages[index] = targetMessages[index].copy(text = text, timestamp = System.currentTimeMillis())
+                targetMessages[index] = targetMessages[index].copy(
+                    text = text,
+                    timestamp = System.currentTimeMillis()
+                )
             } else {
                 targetMessages += ChatMessage(role = MessageRole.ASSISTANT, text = text)
             }
@@ -396,10 +468,12 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         if (value) generatingSessions[target.storageKey] = true else generatingSessions.remove(target.storageKey)
     }
 
-    private fun isSessionGenerating(target: SessionKey): Boolean = generatingSessions[target.storageKey] == true
+    private fun isSessionGenerating(target: SessionKey): Boolean =
+        generatingSessions[target.storageKey] == true
 
     private fun setStatus(target: SessionKey, value: String?) {
-        if (value == null) sessionStatuses.remove(target.storageKey) else sessionStatuses[target.storageKey] = value
+        if (value == null) sessionStatuses.remove(target.storageKey)
+        else sessionStatuses[target.storageKey] = value
     }
 
     private fun isCurrentSession(target: SessionKey): Boolean = target == session
@@ -410,7 +484,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         unreadSessions[session.storageKey] = false
         DiagnosticLogger.d(
             "VM",
-            "conversation_loaded provider=$selectedProviderId messages=${messages.size} generating=${isGenerating} backgroundJobs=${generationJobs.size}"
+            "conversation_loaded provider=$selectedProviderId messages=${messages.size} binding=${bindingStore.loadUrl(session) != null} generating=$isGenerating backgroundJobs=${generationJobs.size}"
         )
     }
 
@@ -422,6 +496,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
 
     class Factory(private val application: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = AIHubViewModel(application) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            AIHubViewModel(application) as T
     }
 }
