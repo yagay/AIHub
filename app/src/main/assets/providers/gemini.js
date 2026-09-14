@@ -4,29 +4,41 @@ window.__AIHUB_CONFIG__ = {
     "rich-textarea div[contenteditable='true']",
     "div.ql-editor[contenteditable='true']",
     "div[contenteditable='true'][aria-label*='Enter a prompt' i]",
+    "[contenteditable='true'][role='textbox']",
     "div[contenteditable='true']",
     "textarea"
   ],
   loggedInSelectors: [
+    "input-area-v2",
+    "rich-textarea",
     "button[aria-label*='New chat' i]",
-    "a[href='/app']",
-    "input-area-v2"
+    "a[href='/app']"
   ],
   sendSelectors: [
-    "button[aria-label*='Send message' i]",
-    "button[aria-label='Send']",
+    "button[aria-label='Send message']",
+    "button[aria-label*='Send' i]",
     "button[mattooltip*='Send' i]",
-    "button.send-button"
+    ".send-button",
+    "button.send-button",
+    "gem-icon-button.submit[aria-disabled='false']"
   ],
   responseSelectors: [
     "message-content.model-response-text",
+    "model-response message-content",
+    "model-response .model-response-text",
+    "model-response .message-content",
+    "model-response .response-content",
     "model-response",
+    "message-content",
+    ".model-response-text",
+    ".response-content",
     "div[class*='model-response-text']",
     "div[class*='model-response']"
   ],
   stopSelectors: [
     "button[aria-label*='Stop response' i]",
-    "button[aria-label*='Stop' i]"
+    "button[aria-label*='Stop' i]",
+    "[aria-busy='true']"
   ],
   newChatSelectors: [
     "button[aria-label*='New chat' i]",
