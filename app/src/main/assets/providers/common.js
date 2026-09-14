@@ -1,5 +1,6 @@
 (() => {
   const cfg = window.__AIHUB_CONFIG__ || {};
+  const sendState = window.__AIHUB_SEND_STATE__ || (window.__AIHUB_SEND_STATE__ = {});
 
   const all = (selectors) => {
     const seen = new Set();
@@ -106,6 +107,7 @@
   };
 
   const responseNodes = () => all(cfg.responseSelectors);
+  const turnNodes = () => all(cfg.turnSelectors);
 
   const textFromTurn = (turn) => {
     if (!turn) return "";
@@ -154,7 +156,33 @@
     return responseViaCopyButton();
   };
 
-  const sendResult = () => cfg.verifySubmission ? "verify" : "ok";
+  const currentSubmissionStatus = () => {
+    const editor = firstVisible(cfg.inputSelectors);
+    const inputChars = editor ? editorText(editor).trim().length : 0;
+    const responses = responseNodes().length;
+    const turns = turnNodes().length;
+    const generating = !!firstVisible(cfg.stopSelectors);
+    const pathChanged = !!sendState.path && location.pathname !== sendState.path;
+    const responseGrowth = responses > Number(sendState.responses || 0);
+    const turnGrowth = turns > Number(sendState.turns || 0);
+    const inputCleared = Number(sendState.submittedChars || 0) > 0 && inputChars === 0;
+    return {
+      acknowledged: !!(pathChanged || responseGrowth || turnGrowth || generating || inputCleared),
+      pathChanged,
+      responseGrowth,
+      turnGrowth,
+      generating,
+      inputCleared,
+      inputChars,
+      responses,
+      turns,
+      elapsedMs: sendState.startedAt ? Date.now() - sendState.startedAt : -1,
+      clickStrategy: sendState.clickStrategy || "",
+      submittedChars: Number(sendState.submittedChars || 0)
+    };
+  };
+
+  const sendResult = () => cfg.verifySubmission === false ? "ok" : "verify";
 
   window.__AIHUB__ = {
     isLoggedIn() {
@@ -164,15 +192,26 @@
     send(text) {
       const editor = firstVisible(cfg.inputSelectors);
       if (!editor) return "no-input";
+
+      sendState.path = location.pathname;
+      sendState.responses = responseNodes().length;
+      sendState.turns = turnNodes().length;
+      sendState.bodyChars = (document.body?.innerText || "").length;
+      sendState.submittedChars = String(text || "").trim().length;
+      sendState.startedAt = Date.now();
+      sendState.clickStrategy = "";
+
       if (!setEditorText(editor, text)) return "input-failed";
 
       const immediate = firstUsable(cfg.sendSelectors);
       if (immediate) {
+        sendState.clickStrategy = "immediate-button";
         immediate.click();
         return sendResult();
       }
 
       let submitted = false;
+      sendState.clickStrategy = "delayed-search";
       const delays = [120, 280, 520, 900];
       delays.forEach((delay, index) => {
         setTimeout(() => {
@@ -180,9 +219,11 @@
           const delayed = firstUsable(cfg.sendSelectors);
           if (delayed) {
             submitted = true;
+            sendState.clickStrategy = `delayed-button-${delay}`;
             delayed.click();
           } else if (index === delays.length - 1) {
             submitted = true;
+            sendState.clickStrategy = "enter-fallback";
             pressEnter(editor);
           }
         }, delay);
@@ -191,10 +232,11 @@
     },
 
     submissionAcknowledged() {
-      const editor = firstVisible(cfg.inputSelectors);
-      const inputChars = editor ? editorText(editor).trim().length : 0;
-      const responses = responseNodes().length;
-      return !editor || inputChars === 0 || responses > 0;
+      return currentSubmissionStatus().acknowledged;
+    },
+
+    submissionStatus() {
+      return currentSubmissionStatus();
     },
 
     extractLastResponse() {
@@ -220,7 +262,7 @@
     probeSummary() {
       const responses = responseNodes();
       const extracted = extractResponse();
-      const turns = all(cfg.turnSelectors);
+      const turns = turnNodes();
       const assistants = all(cfg.assistantMarkerSelectors);
       const copyButtons = all(cfg.copyButtonSelectors);
       const editor = firstVisible(cfg.inputSelectors);
@@ -240,7 +282,8 @@
         lastTurn: nodeSummary(turns.length ? turns[turns.length - 1] : null),
         stopCount: all(cfg.stopSelectors).length,
         path: location.pathname,
-        bodyChars: (document.body?.innerText || "").length
+        bodyChars: (document.body?.innerText || "").length,
+        submission: currentSubmissionStatus()
       };
     }
   };
