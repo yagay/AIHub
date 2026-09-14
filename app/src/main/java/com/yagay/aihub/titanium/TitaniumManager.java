@@ -129,6 +129,9 @@ public final class TitaniumManager {
         }
 
         boolean staleProfileRegistration = purgeStaleExtensionProfileRegistration();
+        if (extensionFilesChanged || staleProfileRegistration) {
+            purgeChromiumServiceWorkerRuntime();
+        }
         ensureTitaniumExtensionRegistered();
         if (extensionFilesChanged || staleProfileRegistration) {
             // Chromium may unpack an external-extension update while the old MV3
@@ -206,6 +209,25 @@ public final class TitaniumManager {
         runSu(purge, 12);
         launched.clear();
         return true;
+    }
+
+    /**
+     * MV3 service workers are persisted separately from Extensions/<id>. Chromium can
+     * therefore unpack the new CRX while restarting a cached worker from the previous
+     * version. On AIHub extension upgrades, stop Titanium and remove only Chromium's
+     * Service Worker runtime/cache directories. Cookies, logins, local storage, history,
+     * tabs, and extension files are left intact; pages re-register service workers on use.
+     */
+    private void purgeChromiumServiceWorkerRuntime() throws Exception {
+        String profiles = titaniumDataDir + "/app_chrome";
+        String profilePattern = q(profiles) + "/*";
+        String command = "am force-stop " + PACKAGE + "; sleep 1; "
+                + "for profile in " + profilePattern + "; do "
+                + "[ -d \"$profile\" ] || continue; "
+                + "[ -d \"$profile/Service Worker\" ] && rm -rf \"$profile/Service Worker\"; "
+                + "done; true";
+        runSu(command, 15);
+        launched.clear();
     }
 
     private void restartTitaniumForExtensionActivation() throws Exception {
