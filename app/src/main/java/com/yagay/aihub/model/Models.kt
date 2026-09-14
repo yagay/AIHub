@@ -4,11 +4,19 @@ import java.util.UUID
 
 enum class MessageRole { USER, ASSISTANT, SYSTEM }
 
+data class AttachmentMeta(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val mimeType: String = "application/octet-stream",
+    val sizeBytes: Long = 0L
+)
+
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: MessageRole,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val attachments: List<AttachmentMeta> = emptyList()
 )
 
 data class ProviderSpec(
