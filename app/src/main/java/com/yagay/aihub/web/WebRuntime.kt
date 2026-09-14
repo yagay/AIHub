@@ -25,6 +25,7 @@ import com.yagay.aihub.model.SessionKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import kotlin.coroutines.resume
@@ -212,6 +213,62 @@ class WebRuntime(private val context: Context) {
     suspend fun probeSummary(session: SessionKey, provider: ProviderSpec): String {
         ensureLoaded(session, provider)
         return call(session, provider, "probeSummary").orEmpty()
+    }
+
+    suspend fun capabilities(session: SessionKey, provider: ProviderSpec): ProviderCapabilities {
+        ensureLoaded(session, provider)
+        val result = ProviderCapabilities.fromJson(call(session, provider, "capabilities"))
+        DiagnosticLogger.d(
+            "CAP",
+            "snapshot provider=${provider.id} model=${result.model} search=${result.search} reasoning=${result.reasoning} research=${result.deepResearch} image=${result.imageGeneration} tools=${result.tools} retry=${result.retry} continue=${result.continueGeneration} history=${result.history} voice=${result.voice}"
+        )
+        return result
+    }
+
+    suspend fun optionList(session: SessionKey, provider: ProviderSpec, kind: String): List<String> {
+        ensureLoaded(session, provider)
+        val raw = call(session, provider, "optionList", JSONObject.quote(kind)).orEmpty()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val value = array.optString(index).trim()
+                if (value.isNotEmpty()) add(value)
+            }
+        }.distinct().take(80)
+    }
+
+    suspend fun openOptionPicker(session: SessionKey, provider: ProviderSpec, kind: String): String {
+        ensureLoaded(session, provider)
+        val result = call(session, provider, "openOptionPicker", JSONObject.quote(kind)).orEmpty()
+        DiagnosticLogger.i("CAP", "open_option_picker provider=${provider.id} kind=$kind result=${result.ifBlank { "null" }}")
+        return result
+    }
+
+    suspend fun selectOption(session: SessionKey, provider: ProviderSpec, kind: String, value: String): String {
+        ensureLoaded(session, provider)
+        val args = "${JSONObject.quote(kind)},${JSONObject.quote(value)}"
+        val result = call(session, provider, "selectOption", args).orEmpty()
+        DiagnosticLogger.i(
+            "CAP",
+            "select_option provider=${provider.id} kind=$kind valueChars=${value.length} result=${result.ifBlank { "null" }}"
+        )
+        return result
+    }
+
+    suspend fun performAction(
+        session: SessionKey,
+        provider: ProviderSpec,
+        action: String,
+        value: String? = null
+    ): String {
+        ensureLoaded(session, provider)
+        val args = "${JSONObject.quote(action)},${JSONObject.quote(value.orEmpty())}"
+        val result = call(session, provider, "performAction", args).orEmpty()
+        DiagnosticLogger.i(
+            "CAP",
+            "perform_action provider=${provider.id} action=$action valueChars=${value?.length ?: 0} result=${result.ifBlank { "null" }}"
+        )
+        return result
     }
 
     suspend fun newChat(session: SessionKey, provider: ProviderSpec) {
