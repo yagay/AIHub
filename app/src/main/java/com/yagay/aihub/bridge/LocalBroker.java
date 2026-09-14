@@ -68,6 +68,14 @@ public final class LocalBroker implements Closeable {
 
     private volatile boolean running;
     private ServerSocket server;
+    private long totalChatRequests;
+    private long totalAssignments;
+    private long totalResults;
+    private long totalErrors;
+    private String lastModel = "";
+    private String lastProvider = "";
+    private String lastStage = "startup";
+    private String lastError = "";
 
     public LocalBroker(ProviderLauncher launcher) {
         this.launcher = launcher;
@@ -102,6 +110,14 @@ public final class LocalBroker implements Closeable {
                 root.put("queuedCommands", queue.size());
                 root.put("pendingCommands", pending.size());
                 root.put("knownCommands", commands.size());
+                root.put("totalChatRequests", totalChatRequests);
+                root.put("totalAssignments", totalAssignments);
+                root.put("totalResults", totalResults);
+                root.put("totalErrors", totalErrors);
+                root.put("lastModel", lastModel);
+                root.put("lastProvider", lastProvider);
+                root.put("lastStage", lastStage);
+                root.put("lastError", lastError);
 
                 JSONArray clientArray = new JSONArray();
                 int index = 0;
@@ -200,11 +216,16 @@ public final class LocalBroker implements Closeable {
         String model = body.optString("model", "chatgpt-web");
         String provider = MODEL_TO_PROVIDER.get(model);
         if (provider == null) {
-            writeJson(out, 400,
-                    new JSONObject().put("error",
-                            new JSONObject().put("message", "Unsupported web model: " + model)),
-                    origin);
-            return;
+            // Compatibility for conversations persisted before AIHub switched
+            // NextChat to the dedicated *-web model names.
+            provider = "chatgpt";
+        }
+        synchronized (lock) {
+            totalChatRequests++;
+            lastModel = model;
+            lastProvider = provider;
+            lastStage = "chat_received";
+            lastError = "";
         }
 
         String id = UUID.randomUUID().toString();
@@ -397,9 +418,22 @@ public final class LocalBroker implements Closeable {
                     future = pending.get(id);
                 }
                 if (future != null) {
+                    String resultError = message.optString("error", "");
+                    synchronized (lock) {
+                        totalResults++;
+                        if (resultError.isEmpty()) {
+                            lastStage = "result_ok";
+                            lastError = "";
+                        } else {
+                            totalErrors++;
+                            lastStage = "result_error";
+                            lastError = resultError.length() > 240
+                                    ? resultError.substring(0, 240)
+                                    : resultError;
+                        }
+                    }
                     future.complete(new Result(
-                            message.optString("response", ""),
-                            message.optString("error", "")));
+                            message.optString("response", ""), resultError));
                 }
                 return;
             }
@@ -429,6 +463,10 @@ public final class LocalBroker implements Closeable {
                                 iterator.remove();
                                 queuedIds.remove(candidate.id);
                                 candidateClient.assigned.add(candidate.id);
+                                totalAssignments++;
+                                lastProvider = candidate.provider;
+                                lastStage = "assigned";
+                                lastError = "";
                                 break;
                             }
                         }
