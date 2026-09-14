@@ -1,0 +1,30 @@
+package com.yagay.aihub.data
+
+import android.content.Context
+import android.net.Uri
+import com.yagay.aihub.model.SessionKey
+
+class ConversationBindingStore(context: Context) {
+    private val prefs = context.getSharedPreferences("aihub_conversation_bindings", Context.MODE_PRIVATE)
+
+    fun loadUrl(session: SessionKey): String? =
+        prefs.getString(urlKey(session), null)?.takeIf { it.isNotBlank() }
+
+    fun saveUrl(session: SessionKey, url: String) {
+        val normalized = normalize(url) ?: return
+        prefs.edit().putString(urlKey(session), normalized).apply()
+    }
+
+    fun clear(session: SessionKey) {
+        prefs.edit().remove(urlKey(session)).apply()
+    }
+
+    private fun urlKey(session: SessionKey): String = "${session.storageKey}_url"
+
+    private fun normalize(raw: String): String? = runCatching {
+        val uri = Uri.parse(raw)
+        if (uri.scheme != "https" && uri.scheme != "http") return@runCatching null
+        if (uri.host.isNullOrBlank()) return@runCatching null
+        uri.buildUpon().clearQuery().fragment(null).build().toString()
+    }.getOrNull()
+}
