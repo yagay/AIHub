@@ -37,16 +37,18 @@
     model: {
       selectors: () => cfg.modelSelectors || [
         "button[data-testid*='model' i]", "[data-testid*='model-switcher' i]",
-        "button[aria-label*='model' i]", "[role='button'][aria-label*='model' i]"
+        "button[aria-label*='model' i]", "[role='button'][aria-label*='model' i]",
+        "button[aria-label*='模式选择器' i]", "button[aria-label*='当前模式' i]"
       ],
-      rx: /(^|\b)(model|模型)(\b|$)/i
+      rx: /(^|\b)(model|models|模型|模式选择器|当前模式)(\b|$)/i
     },
     search: {
       selectors: () => cfg.searchSelectors || [
-        "button[data-testid*='search' i]", "button[aria-label*='search' i]",
-        "[role='button'][aria-label*='search' i]"
+        "button[data-testid*='web-search' i]", "button[aria-label*='search the web' i]",
+        "button[aria-label*='web search' i]", "[role='button'][aria-label*='web search' i]"
       ],
-      rx: /(search( the)? web|web search|browse|联网|搜索网页|网页搜索)/i
+      rx: /(search( the)? web|web search|browse the web|browse web|联网搜索|搜索网页|网页搜索)/i,
+      exclude: /(search chats?|chat search|search history|conversation search|搜索聊天|搜索对话|聊天记录搜索)/i
     },
     reasoning: {
       selectors: () => cfg.reasoningSelectors || [
@@ -68,14 +70,14 @@
         "button[data-testid*='tool' i]", "button[aria-label*='tool' i]",
         "[role='button'][aria-label*='tool' i]"
       ],
-      rx: /(^|\b)(tools?|工具)(\b|$)/i
+      rx: /(^|\b)(tools?|工具|上传和工具)(\b|$)/i
     },
     retry: {
       selectors: () => cfg.retrySelectors || [
         "button[data-testid*='regenerate' i]", "button[data-testid*='retry' i]",
         "button[aria-label*='regenerate' i]", "button[aria-label*='retry' i]"
       ],
-      rx: /(regenerate|retry|try again|重新生成|重试)/i
+      rx: /(regenerate|retry|try again|redo|重新生成|重试)/i
     },
     continue: {
       selectors: () => cfg.continueSelectors || [
@@ -114,7 +116,7 @@
       selectors: () => cfg.historySelectors || [
         "nav a[href*='/c/']", "nav a[href*='/chat/']", "aside a[href]"
       ],
-      rx: /(history|chat history|历史记录|聊天记录)/i
+      rx: /(history|chat history|search chats?|历史记录|聊天记录|搜索聊天)/i
     },
     voice: {
       selectors: () => cfg.voiceSelectors || [
@@ -126,11 +128,20 @@
   };
 
   const findBySelectors = (selectors) => all(selectors).find(usable) || null;
-  const findByText = (rx) => candidates().find((node) => rx.test(text(node))) || null;
+  const findByText = (def) => candidates().find((node) => {
+    const value = text(node);
+    if (def.exclude && def.exclude.test(value)) return false;
+    return def.rx.test(value);
+  }) || null;
   const findAction = (name) => {
     const def = defs[name];
     if (!def) return null;
-    return findBySelectors(def.selectors()) || findByText(def.rx);
+    const direct = findBySelectors(def.selectors());
+    if (direct) {
+      const value = text(direct);
+      if (!def.exclude || !def.exclude.test(value)) return direct;
+    }
+    return findByText(def);
   };
 
   const clickAction = (name) => {
@@ -197,7 +208,7 @@
       conversationMenu: bool(findAction("conversationMenu")),
       rename: bool(findAction("rename")),
       deleteConversation: bool(findAction("deleteConversation")),
-      history: bool(findAction("history") || document.querySelectorAll("a[href*='/c/'], a[href*='/chat/']").length),
+      history: bool(findAction("history") || document.querySelectorAll("a[href*='/c/'], a[href*='/chat/'], a[href*='/app/']").length),
       voice: bool(findAction("voice")),
       currentModel: currentModel(),
       title: document.title || "",
