@@ -39,7 +39,7 @@ import com.yagay.aihub.data.PendingAttachmentStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ProviderSpec
-import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.WindowSessionKey
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -92,10 +92,10 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     private val preferredUrls = mutableMapOf<String, String>()
     private val runtimeInjectedKeys = mutableSetOf<String>()
     private var fileChooserLauncher: ((Intent) -> Unit)? = null
-    private var fileSelectionListener: ((SessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)? = null
-    private var pageChangeListener: ((SessionKey, ProviderSpec, String) -> Unit)? = null
+    private var fileSelectionListener: ((WindowSessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)? = null
+    private var pageChangeListener: ((WindowSessionKey, ProviderSpec, String) -> Unit)? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
-    private var pendingFileSession: SessionKey? = null
+    private var pendingFileSession: WindowSessionKey? = null
     private var pendingFileProvider: ProviderSpec? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
     private var pendingWebPermissionResources: Array<String> = emptyArray()
@@ -114,11 +114,11 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         DiagnosticLogger.d("FILE", "file_chooser_launcher_set available=${launcher != null}")
     }
 
-    fun setFileSelectionListener(listener: ((SessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)?) {
+    fun setFileSelectionListener(listener: ((WindowSessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)?) {
         fileSelectionListener = listener
     }
 
-    fun setPageChangeListener(listener: ((SessionKey, ProviderSpec, String) -> Unit)?) {
+    fun setPageChangeListener(listener: ((WindowSessionKey, ProviderSpec, String) -> Unit)?) {
         pageChangeListener = listener
     }
 
@@ -162,7 +162,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
 
     fun attach(
         host: FrameLayout,
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         preferredUrl: String? = null
     ) {
@@ -194,17 +194,17 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         }
     }
 
-    fun currentUrl(session: SessionKey, provider: ProviderSpec): String? =
+    fun currentUrl(session: WindowSessionKey, provider: ProviderSpec): String? =
         webViews[webViewKey(session, provider)]?.url
 
-    suspend fun isLoggedIn(session: SessionKey, provider: ProviderSpec): Boolean {
+    suspend fun isLoggedIn(session: WindowSessionKey, provider: ProviderSpec): Boolean {
         ensureLoaded(session, provider)
         val result = call(session, provider, "isLoggedIn") == "true"
         DiagnosticLogger.d("WEB", "login_check provider=${provider.id} result=$result")
         return result
     }
 
-    suspend fun openAttachmentPicker(session: SessionKey, provider: ProviderSpec): Boolean {
+    suspend fun openAttachmentPicker(session: WindowSessionKey, provider: ProviderSpec): Boolean {
         ensureLoaded(session, provider)
         val result = call(session, provider, "openAttachmentPicker")
         DiagnosticLogger.i(
@@ -222,7 +222,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     }
 
     suspend fun attachFiles(
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         uris: List<Uri>
     ): AttachmentAttachResult {
@@ -336,7 +336,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         }
     }
 
-    suspend fun send(session: SessionKey, provider: ProviderSpec, prompt: String): Boolean {
+    suspend fun send(session: WindowSessionKey, provider: ProviderSpec, prompt: String): Boolean {
         ensureLoaded(session, provider)
         val result = call(session, provider, "send", JSONObject.quote(prompt))
         DiagnosticLogger.i(
@@ -378,24 +378,24 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         return false
     }
 
-    suspend fun responseSnapshot(session: SessionKey, provider: ProviderSpec): ResponseSnapshot {
+    suspend fun responseSnapshot(session: WindowSessionKey, provider: ProviderSpec): ResponseSnapshot {
         ensureLoaded(session, provider)
         val raw = call(session, provider, "generationState").orEmpty()
         return parseResponseSnapshot(raw)
     }
 
-    suspend fun lastResponse(session: SessionKey, provider: ProviderSpec): String =
+    suspend fun lastResponse(session: WindowSessionKey, provider: ProviderSpec): String =
         responseSnapshot(session, provider).text
 
-    suspend fun isGenerating(session: SessionKey, provider: ProviderSpec): Boolean =
+    suspend fun isGenerating(session: WindowSessionKey, provider: ProviderSpec): Boolean =
         responseSnapshot(session, provider).isGenerating
 
-    suspend fun probeSummary(session: SessionKey, provider: ProviderSpec): String {
+    suspend fun probeSummary(session: WindowSessionKey, provider: ProviderSpec): String {
         ensureLoaded(session, provider)
         return call(session, provider, "probeSummary").orEmpty()
     }
 
-    suspend fun capabilities(session: SessionKey, provider: ProviderSpec): ProviderCapabilities {
+    suspend fun capabilities(session: WindowSessionKey, provider: ProviderSpec): ProviderCapabilities {
         ensureLoaded(session, provider)
         val result = ProviderCapabilities.fromJson(call(session, provider, "capabilities"))
         DiagnosticLogger.d(
@@ -405,7 +405,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         return result
     }
 
-    suspend fun optionList(session: SessionKey, provider: ProviderSpec, kind: String): List<String> {
+    suspend fun optionList(session: WindowSessionKey, provider: ProviderSpec, kind: String): List<String> {
         ensureLoaded(session, provider)
         val raw = call(session, provider, "optionList", JSONObject.quote(kind)).orEmpty()
         val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
@@ -417,7 +417,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         }.distinct().take(80)
     }
 
-    suspend fun openOptionPicker(session: SessionKey, provider: ProviderSpec, kind: String): String {
+    suspend fun openOptionPicker(session: WindowSessionKey, provider: ProviderSpec, kind: String): String {
         ensureLoaded(session, provider)
         val result = call(session, provider, "openOptionPicker", JSONObject.quote(kind)).orEmpty()
         DiagnosticLogger.i(
@@ -428,7 +428,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     }
 
     suspend fun selectOption(
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         kind: String,
         value: String
@@ -444,7 +444,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     }
 
     suspend fun performAction(
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         action: String,
         value: String? = null
@@ -459,7 +459,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         return result
     }
 
-    suspend fun newChat(session: SessionKey, provider: ProviderSpec) {
+    suspend fun newChat(session: WindowSessionKey, provider: ProviderSpec) {
         bindingStore.clear(session)
         pendingAttachmentStore.clear(session)
         preferredUrls.remove(webViewKey(session, provider))
@@ -468,15 +468,15 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         DiagnosticLogger.i("WEB", "adapter_new_chat provider=${provider.id} result=${result ?: "null"}")
     }
 
-    suspend fun stop(session: SessionKey, provider: ProviderSpec) {
+    suspend fun stop(session: WindowSessionKey, provider: ProviderSpec) {
         val result = call(session, provider, "stop")
         DiagnosticLogger.i("WEB", "adapter_stop provider=${provider.id} result=${result ?: "null"}")
     }
 
-    fun canGoBack(session: SessionKey, provider: ProviderSpec): Boolean =
+    fun canGoBack(session: WindowSessionKey, provider: ProviderSpec): Boolean =
         webViews[webViewKey(session, provider)]?.canGoBack() == true
 
-    fun goBack(session: SessionKey, provider: ProviderSpec): Boolean {
+    fun goBack(session: WindowSessionKey, provider: ProviderSpec): Boolean {
         val webView = webViews[webViewKey(session, provider)] ?: return false
         if (!webView.canGoBack()) return false
         webView.goBack()
@@ -521,7 +521,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         return true
     }
 
-    fun markAttachmentsSubmitted(session: SessionKey, provider: ProviderSpec) {
+    fun markAttachmentsSubmitted(session: WindowSessionKey, provider: ProviderSpec) {
         pendingAttachmentStore.clear(session)
         webViews[webViewKey(session, provider)]?.evaluateJavascript(
             "if(window.__AIHUB_ATTACHMENT_STATE__){window.__AIHUB_ATTACHMENT_STATE__.lastAttachedCount=0;window.__AIHUB_ATTACHMENT_STATE__.lastAttachedAt=0;}",
@@ -530,7 +530,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         fileSelectionListener?.invoke(session, provider, emptyList())
     }
 
-    fun resetSession(session: SessionKey, provider: ProviderSpec) {
+    fun resetSession(session: WindowSessionKey, provider: ProviderSpec) {
         val key = webViewKey(session, provider)
         val webView = webViews[key] ?: obtain(session, provider)
         val policy = ProviderWebPolicies.forProvider(provider)
@@ -564,7 +564,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
                 cookieManager.flush()
                 restoredKeys += key
                 webView.loadUrl(provider.homeUrl)
-                DiagnosticLogger.i("WEB", "session_reset provider=${provider.id} account=${session.accountId.take(12)}")
+                DiagnosticLogger.i("WEB", "session_reset provider=${provider.id} account=${session.windowId.take(12)}")
             }
         }
 
@@ -576,7 +576,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         }
     }
 
-    fun destroySession(session: SessionKey, provider: ProviderSpec) {
+    fun destroySession(session: WindowSessionKey, provider: ProviderSpec) {
         val key = webViewKey(session, provider)
         val webView = webViews.remove(key) ?: return
         if (pendingFileSession == session) {
@@ -594,7 +594,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         pendingBinaryDownloads.remove(key)
         DiagnosticLogger.i(
             "WEB",
-            "webview_destroyed provider=${provider.id} window=${session.accountId.take(12)}"
+            "webview_destroyed provider=${provider.id} window=${session.windowId.take(12)}"
         )
     }
 
@@ -623,16 +623,16 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         runtimeInjectedKeys.clear()
     }
 
-    private fun webViewKey(session: SessionKey, provider: ProviderSpec): String =
+    private fun webViewKey(session: WindowSessionKey, provider: ProviderSpec): String =
         session.storageKey
 
-    private fun obtain(session: SessionKey, provider: ProviderSpec): WebView {
+    private fun obtain(session: WindowSessionKey, provider: ProviderSpec): WebView {
         val key = webViewKey(session, provider)
         val policy = ProviderWebPolicies.forProvider(provider)
         return webViews.getOrPut(key) {
             DiagnosticLogger.i(
                 "WEB",
-                "webview_create provider=${provider.id} account=${session.accountId.take(12)} multiProfile=$supportsMultiProfile"
+                "webview_create provider=${provider.id} account=${session.windowId.take(12)} multiProfile=$supportsMultiProfile"
             )
             WebView(context).apply {
                 if (supportsMultiProfile) {
@@ -710,7 +710,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
 
                         DiagnosticLogger.i(
                             "FILE",
-                            "file_chooser_open provider=${provider.id} account=${session.accountId.take(12)} mode=${fileChooserParams.mode} accepts=${fileChooserParams.acceptTypes.filter { it.isNotBlank() }.joinToString("|").take(240)}"
+                            "file_chooser_open provider=${provider.id} account=${session.windowId.take(12)} mode=${fileChooserParams.mode} accepts=${fileChooserParams.acceptTypes.filter { it.isNotBlank() }.joinToString("|").take(240)}"
                         )
                         return runCatching {
                             launcher(intent)
@@ -936,7 +936,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
 
     private fun confirmFileSelection(
         webView: WebView,
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         attachments: List<AttachmentMeta>,
         attempt: Int
@@ -994,7 +994,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         cookieManager.flush()
     }
 
-    private suspend fun ensureLoaded(session: SessionKey, provider: ProviderSpec) {
+    private suspend fun ensureLoaded(session: WindowSessionKey, provider: ProviderSpec) {
         val key = webViewKey(session, provider)
         val webView = obtain(session, provider)
         if (webView.url.isNullOrBlank()) {
@@ -1014,7 +1014,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     }
 
     private suspend fun call(
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         action: String,
         argumentJs: String? = null
@@ -1067,7 +1067,7 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
     }
 
     private suspend fun ensureRuntimeInjected(
-        session: SessionKey,
+        session: WindowSessionKey,
         provider: ProviderSpec,
         webView: WebView
     ): Boolean {
@@ -1102,12 +1102,12 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
             runtimeInjectedKeys += key
             DiagnosticLogger.i(
                 "JS",
-                "runtime_injected provider=${provider.id} account=${session.accountId.take(12)} bytes=${source.length}"
+                "runtime_injected provider=${provider.id} account=${session.windowId.take(12)} bytes=${source.length}"
             )
         } else {
             DiagnosticLogger.w(
                 "JS",
-                "runtime_injection_failed provider=${provider.id} account=${session.accountId.take(12)} result=${result ?: "null"}"
+                "runtime_injection_failed provider=${provider.id} account=${session.windowId.take(12)} result=${result ?: "null"}"
             )
         }
         return ready
