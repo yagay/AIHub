@@ -363,7 +363,7 @@ class WebRuntime(private val context: Context) {
 
     fun handleAndroidPermissionResult(
         requestCode: Int,
-        permissions: Array<out String>,
+        permissions: Array<String>,
         grantResults: IntArray
     ): Boolean {
         if (requestCode != WEB_PERMISSION_REQUEST_CODE) return false
@@ -796,7 +796,7 @@ class WebRuntime(private val context: Context) {
         cookieManager.flush()
     }
 
-    private suspend fun ensureLoaded(    private suspend fun ensureLoaded(session: SessionKey, provider: ProviderSpec) {
+    private suspend fun ensureLoaded(session: SessionKey, provider: ProviderSpec) {
         val key = webViewKey(session, provider)
         val webView = obtain(session, provider)
         if (webView.url.isNullOrBlank()) {
