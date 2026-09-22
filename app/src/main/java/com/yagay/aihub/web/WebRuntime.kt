@@ -344,8 +344,12 @@ class WebRuntime(private val context: Context) {
     }
 
     fun flushCookies() {
-        runCatching { CookieManager.getInstance().flush() }
-            .onFailure { DiagnosticLogger.e("WEB", "cookie_flush_failed", it) }
+        val managers = webViews.values.map { cookieManagerFor(it) }.toSet()
+        val targets = if (managers.isEmpty()) setOf(CookieManager.getInstance()) else managers
+        targets.forEach { manager ->
+            runCatching { manager.flush() }
+                .onFailure { DiagnosticLogger.e("WEB", "cookie_flush_failed", it) }
+        }
     }
 
     fun destroy() {
@@ -398,8 +402,10 @@ class WebRuntime(private val context: Context) {
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.setSupportMultipleWindows(false)
                 settings.userAgentString = compatibleUserAgent(settings.userAgentString)
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                cookieManagerFor(this).apply {
+                    setAcceptCookie(true)
+                    setAcceptThirdPartyCookies(this@apply, true)
+                }
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onPermissionRequest(request: PermissionRequest) {
@@ -727,7 +733,7 @@ class WebRuntime(private val context: Context) {
                 setAllowedOverMetered(true)
                 setAllowedOverRoaming(false)
                 if (!mimeType.isNullOrBlank()) setMimeType(mimeType)
-                val cookie = CookieManager.getInstance().getCookie(url)
+                val cookie = cookieManagerFor(webView).getCookie(url)
                 if (!cookie.isNullOrBlank()) addRequestHeader("Cookie", cookie)
                 val ua = userAgent?.takeIf { it.isNotBlank() } ?: webView.settings.userAgentString
                 if (!ua.isNullOrBlank()) addRequestHeader("User-Agent", ua)
@@ -772,6 +778,13 @@ class WebRuntime(private val context: Context) {
             mimeType = context.contentResolver.getType(uri).orEmpty().ifBlank { "application/octet-stream" },
             sizeBytes = size
         )
+    }
+
+    private fun cookieManagerFor(webView: WebView): CookieManager {
+        if (!supportsMultiProfile) return CookieManager.getInstance()
+        return runCatching { WebViewCompat.getProfile(webView).cookieManager }
+            .onFailure { DiagnosticLogger.e("WEB", "profile_cookie_manager_failed", it) }
+            .getOrElse { CookieManager.getInstance() }
     }
 
     private fun compatibleUserAgent(base: String): String =
