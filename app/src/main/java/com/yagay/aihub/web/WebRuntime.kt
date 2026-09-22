@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.view.ViewGroup
@@ -718,8 +719,8 @@ class WebRuntime(private val context: Context) {
         mimeType: String?
     ) {
         val uri = runCatching { Uri.parse(url) }.getOrNull()
-        if (uri == null || (uri.scheme != "https" && uri.scheme != "http")) {
-            DiagnosticLogger.w("DOWNLOAD", "unsupported_download_scheme url=${safeUrl(url)}")
+        if (uri == null || (uri.scheme != "https" && uri.scheme != "http") || uri.host.isNullOrBlank()) {
+            DiagnosticLogger.w("DOWNLOAD", "unsupported_download_url url=${safeUrl(url)}")
             return
         }
 
@@ -738,7 +739,11 @@ class WebRuntime(private val context: Context) {
                 if (!ua.isNullOrBlank()) addRequestHeader("User-Agent", ua)
                 webView.url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
                     ?.let { addRequestHeader("Referer", it) }
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                } else {
+                    setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, fileName)
+                }
             }
             val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val id = manager.enqueue(request)
