@@ -4,15 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yagay.aihub.diagnostics.DiagnosticLogger
-import com.yagay.aihub.ui.AIHubRoot
-import com.yagay.aihub.ui.AIHubViewModel
+import com.yagay.aihub.ui.WorkspaceRoot
 import com.yagay.aihub.ui.theme.AIHubTheme
-import com.yagay.aihub.web.WebRuntime
+import com.yagay.aihub.web.WindowWebRuntime
 
 class MainActivity : ComponentActivity() {
-    private val webRuntime by lazy { WebRuntime(this) }
+    private val webRuntime by lazy { WindowWebRuntime(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -20,8 +18,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             AIHubTheme {
-                val vm: AIHubViewModel = viewModel(factory = AIHubViewModel.Factory(application))
-                AIHubRoot(viewModel = vm, runtimeFactory = { webRuntime })
+                WorkspaceRoot(runtime = webRuntime)
             }
         }
     }
@@ -36,8 +33,17 @@ class MainActivity : ComponentActivity() {
         permissions: Array<String>,
         grantResults: IntArray
     ) {
-        if (!webRuntime.handleAndroidPermissionResult(requestCode, permissions, grantResults)) {
-            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (!webRuntime.handleAndroidPermissionResult(
+                requestCode,
+                permissions,
+                grantResults
+            )
+        ) {
+            super.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+            )
         }
     }
 }
