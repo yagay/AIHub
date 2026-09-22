@@ -39,7 +39,6 @@ data class ProviderWebPolicy(
 
 object ProviderWebPolicies {
     private val commonAuthHosts = setOf(
-        "accounts.google.com",
         "login.microsoftonline.com",
         "login.live.com",
         "appleid.apple.com",
@@ -62,7 +61,7 @@ object ProviderWebPolicies {
         val providerAuth = when (provider.id) {
             "chatgpt" -> setOf("auth.openai.com")
             "claude" -> setOf("console.anthropic.com")
-            "gemini" -> setOf("accounts.google.com", "myaccount.google.com")
+            "gemini" -> emptySet()
             "grok" -> setOf("x.com", "twitter.com")
             "qwen" -> setOf("account.aliyun.com", "passport.alibaba.com")
             else -> emptySet()
