@@ -12,8 +12,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.2.1"
+        versionCode = 22
+        versionName = "0.2.2"
     }
 
     buildFeatures {
@@ -24,6 +24,15 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
+        }
     }
 
     packaging {
