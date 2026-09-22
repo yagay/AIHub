@@ -44,10 +44,25 @@ import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 class WebRuntime(private val context: Context) {
+    data class AttachmentAttachResult(
+        val attachedCount: Int,
+        val names: List<String>,
+        val failure: String? = null
+    )
+
+    private data class NativeAttachmentStage(
+        val providerId: String,
+        val host: String,
+        val uri: Uri,
+        val mimeType: String
+    )
+
     private data class BinaryDownloadMeta(
         val fileName: String,
         val mimeType: String,
@@ -85,6 +100,7 @@ class WebRuntime(private val context: Context) {
     private var pendingWebPermissionRequest: PermissionRequest? = null
     private var pendingWebPermissionResources: Array<String> = emptyArray()
     private val pendingBinaryDownloads = mutableMapOf<String, BinaryDownloadMeta>()
+    private val nativeAttachmentStages = ConcurrentHashMap<String, NativeAttachmentStage>()
 
     init {
         DiagnosticLogger.i("WEB", "runtime_created multiProfile=$supportsMultiProfile")
@@ -203,6 +219,121 @@ class WebRuntime(private val context: Context) {
             "attachment_picker_unavailable provider=${provider.id} probe=${DiagnosticLogger.scrub(probe).take(1200)}"
         )
         return false
+    }
+
+    suspend fun attachFiles(
+        session: SessionKey,
+        provider: ProviderSpec,
+        uris: List<Uri>
+    ): AttachmentAttachResult {
+        if (uris.isEmpty()) return AttachmentAttachResult(0, emptyList(), "no-selection")
+
+        ensureLoaded(session, provider)
+        val webView = obtain(session, provider)
+        val current = runCatching { Uri.parse(webView.url ?: provider.homeUrl) }.getOrNull()
+        val host = current?.host?.lowercase().orEmpty()
+        val scheme = current?.scheme?.lowercase().orEmpty()
+        if (host.isBlank() || (scheme != "https" && scheme != "http")) {
+            return AttachmentAttachResult(0, emptyList(), "invalid-page")
+        }
+
+        val policy = ProviderWebPolicies.forProvider(provider)
+        if (!policy.primaryHosts.any { allowed ->
+                host == allowed.lowercase() || host.endsWith(".${allowed.lowercase()}")
+            }) {
+            DiagnosticLogger.w(
+                "FILE",
+                "native_attachment_wrong_origin provider=${provider.id} host=$host"
+            )
+            return AttachmentAttachResult(0, emptyList(), "wrong-origin")
+        }
+
+        val metadata = uris.mapIndexed { index, uri -> queryAttachmentMeta(uri, index) }
+        val authority = current?.authority ?: host
+        val stagedTokens = mutableListOf<String>()
+        val payload = JSONArray()
+
+        metadata.forEachIndexed { index, meta ->
+            val token = UUID.randomUUID().toString().replace("-", "")
+            stagedTokens += token
+            nativeAttachmentStages[token] = NativeAttachmentStage(
+                providerId = provider.id,
+                host = host,
+                uri = uris[index],
+                mimeType = meta.mimeType
+            )
+            payload.put(
+                JSONObject()
+                    .put("url", "$scheme://$authority$NATIVE_ATTACHMENT_PATH_PREFIX$token")
+                    .put("name", meta.name)
+                    .put("mime", meta.mimeType)
+                    .put("size", meta.sizeBytes)
+            )
+        }
+
+        try {
+            call(session, provider, "prepareAttachmentInput")
+            delay(180)
+
+            repeat(4) { round ->
+                val start = call(
+                    session,
+                    provider,
+                    "attachNativeFiles",
+                    JSONObject.quote(payload.toString())
+                ).orEmpty()
+
+                DiagnosticLogger.d(
+                    "FILE",
+                    "native_attachment_inject_start provider=${provider.id} round=$round result=$start selected=${uris.size}"
+                )
+
+                if (start == "no-input") {
+                    call(session, provider, "prepareAttachmentInput")
+                    delay(250L + round * 180L)
+                    return@repeat
+                }
+
+                if (start == "started" || start.startsWith("attached:")) {
+                    repeat(60) {
+                        delay(180)
+                        val status = call(session, provider, "nativeAttachmentStatus").orEmpty()
+                        if (status.startsWith("attached:")) {
+                            val count = status.substringAfter(':').toIntOrNull() ?: 0
+                            if (count > 0) {
+                                val accepted = metadata.take(minOf(count, metadata.size))
+                                pendingAttachmentStore.save(session, accepted)
+                                fileSelectionListener?.invoke(session, provider, accepted)
+                                DiagnosticLogger.i(
+                                    "FILE",
+                                    "native_attachment_injected provider=${provider.id} selected=${uris.size} attached=${accepted.size}"
+                                )
+                                return AttachmentAttachResult(accepted.size, accepted.map { it.name })
+                            }
+                        }
+                        if (status.startsWith("error:") || status == "no-input") {
+                            DiagnosticLogger.w(
+                                "FILE",
+                                "native_attachment_inject_status provider=${provider.id} status=${DiagnosticLogger.scrub(status).take(300)}"
+                            )
+                            return@repeat
+                        }
+                    }
+                }
+
+                call(session, provider, "prepareAttachmentInput")
+                delay(300)
+            }
+
+            val probe = call(session, provider, "attachmentProbe").orEmpty()
+            DiagnosticLogger.w(
+                "FILE",
+                "native_attachment_injection_failed provider=${provider.id} probe=${DiagnosticLogger.scrub(probe).take(1200)}"
+            )
+            return AttachmentAttachResult(0, emptyList(), "not-attached")
+        } finally {
+            stagedTokens.forEach(nativeAttachmentStages::remove)
+        }
     }
 
     suspend fun send(session: SessionKey, provider: ProviderSpec, prompt: String): Boolean {
@@ -455,6 +586,7 @@ class WebRuntime(private val context: Context) {
         pendingWebPermissionRequest = null
         pendingWebPermissionResources = emptyArray()
         pendingBinaryDownloads.clear()
+        nativeAttachmentStages.clear()
         fileSelectionListener = null
         pageChangeListener = null
         flushCookies()
@@ -602,6 +734,14 @@ class WebRuntime(private val context: Context) {
                         super.onPageFinished(view, url)
                     }
 
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): WebResourceResponse? {
+                        serveNativeAttachment(provider, request.url)?.let { return it }
+                        return super.shouldInterceptRequest(view, request)
+                    }
+
                     override fun shouldOverrideUrlLoading(
                         view: WebView,
                         request: WebResourceRequest
@@ -654,6 +794,42 @@ class WebRuntime(private val context: Context) {
                 }
             }
         }
+    }
+
+    private fun serveNativeAttachment(provider: ProviderSpec, uri: Uri): WebResourceResponse? {
+        val path = uri.path.orEmpty()
+        if (!path.startsWith(NATIVE_ATTACHMENT_PATH_PREFIX)) return null
+        val token = path.removePrefix(NATIVE_ATTACHMENT_PATH_PREFIX).substringBefore('/')
+        if (token.isBlank()) return null
+
+        val staged = nativeAttachmentStages[token] ?: return null
+        if (staged.providerId != provider.id || !staged.host.equals(uri.host, ignoreCase = true)) {
+            DiagnosticLogger.w(
+                "FILE",
+                "native_attachment_request_rejected provider=${provider.id} host=${uri.host.orEmpty()}"
+            )
+            return WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden", emptyMap(), null)
+        }
+
+        val stream = runCatching { context.contentResolver.openInputStream(staged.uri) }
+            .onFailure {
+                DiagnosticLogger.e("FILE", "native_attachment_stream_failed provider=${provider.id}", it)
+            }
+            .getOrNull()
+            ?: return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), null)
+
+        DiagnosticLogger.d(
+            "FILE",
+            "native_attachment_stream_open provider=${provider.id} mime=${staged.mimeType}"
+        )
+        return WebResourceResponse(
+            staged.mimeType,
+            null,
+            200,
+            "OK",
+            mapOf("Cache-Control" to "no-store, no-cache"),
+            stream
+        )
     }
 
     private fun handleUri(provider: ProviderSpec, uri: Uri, isMainFrame: Boolean): Boolean {
@@ -1296,6 +1472,7 @@ class WebRuntime(private val context: Context) {
     companion object {
         private const val WEB_PERMISSION_REQUEST_CODE = 4107
         private const val MAX_BINARY_DOWNLOAD_BYTES = 64 * 1024 * 1024
+        private const val NATIVE_ATTACHMENT_PATH_PREFIX = "/__aihub_native_attachment/"
         private val FILE_CONFIRM_DELAYS = longArrayOf(180L, 420L, 900L, 1600L)
     }
 }

@@ -147,6 +147,76 @@
     return "scheduled";
   };
 
+  const assignFiles = (input, files) => {
+    let transfer = null;
+    try { transfer = new DataTransfer(); } catch (_) {}
+    if (!transfer?.items) return 0;
+
+    const max = input.multiple ? files.length : Math.min(files.length, 1);
+    for (let i = 0; i < max; i++) {
+      try { transfer.items.add(files[i]); } catch (_) {}
+    }
+    if (!transfer.files?.length) return 0;
+
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+      if (descriptor?.set) descriptor.set.call(input, transfer.files);
+      else input.files = transfer.files;
+      input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      rememberSelection(input);
+      return transfer.files.length;
+    } catch (_) {
+      return 0;
+    }
+  };
+
+  api.attachNativeFiles = (payload) => {
+    if (state.nativeInjectInFlight) return "busy";
+
+    let items = [];
+    try { items = JSON.parse(String(payload || "[]")); } catch (_) { return "invalid-payload"; }
+    if (!Array.isArray(items) || !items.length) return "no-files";
+
+    const input = bestFileInput();
+    if (!input) return "no-input";
+
+    state.nativeInjectInFlight = true;
+    state.nativeInjectStatus = "loading";
+
+    (async () => {
+      try {
+        const files = [];
+        for (const item of items) {
+          const response = await fetch(String(item.url || ""), {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin"
+          });
+          if (!response.ok) throw new Error(`fetch-${response.status}`);
+          const blob = await response.blob();
+          const mime = String(item.mime || blob.type || "application/octet-stream");
+          files.push(new File([blob], String(item.name || "attachment"), {
+            type: mime,
+            lastModified: Date.now()
+          }));
+        }
+
+        const attached = assignFiles(input, files);
+        state.nativeInjectStatus = attached > 0 ? `attached:${attached}` : "error:filelist";
+        state.lastStrategy = "native-picker-data-transfer";
+      } catch (error) {
+        state.nativeInjectStatus = `error:${String(error?.message || error || "unknown").slice(0, 160)}`;
+      } finally {
+        state.nativeInjectInFlight = false;
+      }
+    })();
+
+    return "started";
+  };
+
+  api.nativeAttachmentStatus = () => state.nativeInjectStatus || "idle";
+
   api.attachStagedFiles = () => "standard-picker-only";
 
   api.attachmentProbe = () => {

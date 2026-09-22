@@ -105,11 +105,40 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     var optionValues by remember { mutableStateOf<List<String>>(emptyList()) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmResetWeb by remember { mutableStateOf(false) }
+    var nativePickerTarget by remember { mutableStateOf<Pair<com.yagay.aihub.model.SessionKey, com.yagay.aihub.model.ProviderSpec>?>(null) }
 
     val webFileChooser = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         runtime.handleFileChooserResult(result.resultCode, result.data)
+    }
+
+    val nativeAttachmentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        val target = nativePickerTarget
+        nativePickerTarget = null
+        if (uris.isEmpty() || target == null) {
+            DiagnosticLogger.i("FILE", "native_attachment_selection_cancelled")
+        } else {
+            val (targetSession, provider) = target
+            scope.launch {
+                val result = runCatching {
+                    runtime.attachFiles(targetSession, provider, uris)
+                }.onFailure {
+                    DiagnosticLogger.e("FILE", "native_attachment_injection_exception provider=${provider.id}", it)
+                }.getOrNull()
+
+                if (result == null || result.attachedCount <= 0) {
+                    Toast.makeText(
+                        context,
+                        "${provider.name} 没有接收所选文件，已打开官网供你检查。",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    if (targetSession == viewModel.session) viewModel.openWeb()
+                }
+            }
+        }
     }
 
     val exportDiagnostics = rememberLauncherForActivityResult(
@@ -360,22 +389,8 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                         if (viewModel.isGenerating) {
                             Toast.makeText(context, "${provider.name} 正在生成，请等待或停止后再添加附件。", Toast.LENGTH_SHORT).show()
                         } else {
-                            scope.launch {
-                                val opened = runCatching {
-                                    runtime.openAttachmentPicker(targetSession, provider)
-                                }.onFailure {
-                                    DiagnosticLogger.e("FILE", "attachment_picker_exception provider=${provider.id}", it)
-                                }.getOrDefault(false)
-
-                                if (!opened) {
-                                    Toast.makeText(
-                                        context,
-                                        "${provider.name} 当前页面没有找到附件入口，已打开官网。",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    viewModel.openWeb()
-                                }
-                            }
+                            nativePickerTarget = targetSession to provider
+                            nativeAttachmentPicker.launch(arrayOf("*/*"))
                         }
                     },
                     onSend = {
