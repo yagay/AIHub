@@ -2,6 +2,7 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://maven.mozilla.org/maven2/")
         gradlePluginPortal()
     }
 }
@@ -16,3 +17,11 @@ dependencyResolutionManagement {
 
 rootProject.name = "AIHub"
 include(":app")
+
+
+includeBuild("vendor/YBrowser") {
+    dependencySubstitution {
+        substitute(module("com.yagay.ybrowser:browser-core"))
+            .using(project(":browser-core"))
+    }
+}
