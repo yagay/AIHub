@@ -402,10 +402,9 @@ class WebRuntime(private val context: Context) {
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.setSupportMultipleWindows(false)
                 settings.userAgentString = compatibleUserAgent(settings.userAgentString)
-                cookieManagerFor(this).apply {
-                    setAcceptCookie(true)
-                    setAcceptThirdPartyCookies(this@apply, true)
-                }
+                val profileCookies = cookieManagerFor(this)
+                profileCookies.setAcceptCookie(true)
+                profileCookies.setAcceptThirdPartyCookies(this, true)
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onPermissionRequest(request: PermissionRequest) {
