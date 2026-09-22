@@ -49,7 +49,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
-class WebRuntime(private val context: Context) {
+class WebRuntime(private val context: Context, private val useProfiles: Boolean = true) {
     data class AttachmentAttachResult(
         val attachedCount: Int,
         val names: List<String>,
@@ -107,7 +107,7 @@ class WebRuntime(private val context: Context) {
     }
 
     val supportsMultiProfile: Boolean
-        get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+        get() = useProfiles && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
 
     fun setFileChooserLauncher(launcher: ((Intent) -> Unit)?) {
         fileChooserLauncher = launcher
@@ -576,6 +576,28 @@ class WebRuntime(private val context: Context) {
         }
     }
 
+    fun destroySession(session: SessionKey, provider: ProviderSpec) {
+        val key = webViewKey(session, provider)
+        val webView = webViews.remove(key) ?: return
+        if (pendingFileSession == session) {
+            pendingFileCallback?.onReceiveValue(null)
+            pendingFileCallback = null
+            pendingFileSession = null
+            pendingFileProvider = null
+        }
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.stopLoading()
+        webView.destroy()
+        restoredKeys.remove(key)
+        preferredUrls.remove(key)
+        runtimeInjectedKeys.remove(key)
+        pendingBinaryDownloads.remove(key)
+        DiagnosticLogger.i(
+            "WEB",
+            "webview_destroyed provider=${provider.id} window=${session.accountId.take(12)}"
+        )
+    }
+
     fun destroy() {
         DiagnosticLogger.i("WEB", "runtime_destroy webViews=${webViews.size}")
         pendingFileCallback?.onReceiveValue(null)
@@ -602,7 +624,7 @@ class WebRuntime(private val context: Context) {
     }
 
     private fun webViewKey(session: SessionKey, provider: ProviderSpec): String =
-        if (supportsMultiProfile) session.storageKey else provider.id
+        session.storageKey
 
     private fun obtain(session: SessionKey, provider: ProviderSpec): WebView {
         val key = webViewKey(session, provider)
