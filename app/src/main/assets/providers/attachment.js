@@ -72,71 +72,23 @@
     return candidates.find((node) => visible(node) && rx.test((node.innerText || node.textContent || node.getAttribute?.("aria-label") || "").trim())) || null;
   };
 
-  const b64ToBytes = (value) => {
-    const raw = atob(value || "");
-    const bytes = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    return bytes;
+  const rememberSelection = (input) => {
+    const count = Number(input?.files?.length || 0);
+    if (count <= 0) return;
+    state.lastAttachedCount = count;
+    state.lastAttachedAt = Date.now();
+    state.lastInputAccept = input.accept || "";
+    state.lastInputMultiple = !!input.multiple;
+    state.lastStrategy = "webview-file-chooser";
   };
 
-  const stagedFiles = () => {
-    const bridge = window.AIHubNativeFiles;
-    if (!bridge || typeof bridge.count !== "function") return [];
-    const total = Number(bridge.count()) || 0;
-    const result = [];
-    for (let i = 0; i < total; i++) {
-      const parts = [];
-      const chunks = Number(bridge.chunkCount(i)) || 0;
-      for (let part = 0; part < chunks; part++) {
-        const encoded = bridge.chunk(i, part);
-        if (encoded) parts.push(b64ToBytes(encoded));
-      }
-      const name = String(bridge.name(i) || `attachment-${i + 1}`);
-      const mime = String(bridge.mime(i) || "application/octet-stream");
-      result.push(new File(parts, name, { type: mime, lastModified: Date.now() }));
-    }
-    return result;
-  };
-
-  const dispatchFileEvents = (input) => {
-    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-  };
-
-  const assignWithDataTransfer = (input, files) => {
-    let data = null;
-    try { data = new DataTransfer(); } catch (_) {}
-    if (!data) {
-      try { data = new ClipboardEvent("").clipboardData; } catch (_) {}
-    }
-    if (!data?.items) return 0;
-    const max = input.multiple ? files.length : Math.min(files.length, 1);
-    for (let i = 0; i < max; i++) {
-      try { data.items.add(files[i]); } catch (_) {}
-    }
-    if (!data.files || data.files.length === 0) return 0;
-    try {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
-      if (descriptor?.set) descriptor.set.call(input, data.files); else input.files = data.files;
-      dispatchFileEvents(input);
-      state.lastStrategy = "native-filelist";
-      return data.files.length;
-    } catch (_) { return 0; }
-  };
-
-  const assignWithInstanceOverride = (input, files) => {
-    const max = input.multiple ? files.length : Math.min(files.length, 1);
-    const selected = files.slice(0, max);
-    if (!selected.length) return 0;
-    const fileListLike = selected.slice();
-    fileListLike.item = (index) => fileListLike[index] || null;
-    try {
-      Object.defineProperty(input, "files", { configurable: true, enumerable: true, get: () => fileListLike });
-      dispatchFileEvents(input);
-      state.lastStrategy = "instance-files-override";
-      return selected.length;
-    } catch (_) { return 0; }
-  };
+  if (!state.changeListenerInstalled) {
+    state.changeListenerInstalled = true;
+    document.addEventListener("change", (event) => {
+      const input = event.target;
+      if (input instanceof HTMLInputElement && input.type === "file") rememberSelection(input);
+    }, true);
+  }
 
   api.prepareAttachmentInput = () => {
     if (bestFileInput()) return "ready";
@@ -150,48 +102,57 @@
     if (!button) return "not-found";
     button.click();
     state.lastPrepare = "opened-menu";
-    [100, 240, 480].forEach((delay) => {
-      setTimeout(() => {
-        if (bestFileInput()) return;
-        const item = findUploadMenuItem();
-        if (item) {
-          try { item.click(); state.lastPrepare = "clicked-upload-item"; } catch (_) {}
-        }
-      }, delay);
-    });
     return "opened-menu";
   };
 
-  api.attachStagedFiles = () => {
-    const bridge = window.AIHubNativeFiles;
-    if (!bridge || typeof bridge.count !== "function") return "no-bridge";
-    const input = bestFileInput();
-    if (!input) return "no-input";
-    const files = stagedFiles();
-    if (!files.length) return "no-files";
-    let attached = assignWithDataTransfer(input, files);
-    if (attached <= 0) attached = assignWithInstanceOverride(input, files);
-    if (attached > 0) {
-      state.lastAttachedCount = attached;
-      state.lastAttachedAt = Date.now();
-      state.lastInputAccept = input.accept || "";
-      state.lastInputMultiple = !!input.multiple;
-    }
-    return `attached:${attached}`;
-  };
-
   api.openAttachmentPicker = () => {
-    const input = bestFileInput();
-    if (input) { input.click(); return "opened-input"; }
+    const direct = bestFileInput();
+    if (direct) {
+      direct.click();
+      state.lastPicker = "direct-input";
+      return "opened-input";
+    }
+
+    const menuItem = findUploadMenuItem();
+    if (menuItem) {
+      menuItem.click();
+      state.lastPicker = "menu-item";
+      return "opened-button";
+    }
+
     const button = findAttachmentButton();
     if (!button) return "not-found";
     button.click();
-    return "opened-button";
+    state.lastPicker = "attachment-button";
+
+    let completed = false;
+    [120, 280, 520, 900].forEach((delay) => {
+      setTimeout(() => {
+        if (completed) return;
+        const input = bestFileInput();
+        if (input) {
+          completed = true;
+          input.click();
+          state.lastPicker = `delayed-input-${delay}`;
+          return;
+        }
+        const item = findUploadMenuItem();
+        if (item) {
+          completed = true;
+          item.click();
+          state.lastPicker = `delayed-menu-${delay}`;
+        }
+      }, delay);
+    });
+    return "scheduled";
   };
+
+  api.attachStagedFiles = () => "standard-picker-only";
 
   api.attachmentProbe = () => {
     const inputs = fileInputs();
     const input = bestFileInput();
+    const liveCount = inputs.reduce((sum, it) => sum + Number(it.files?.length || 0), 0);
     return {
       inputCount: inputs.length,
       accepts: inputs.slice(0, 6).map((it) => it.accept || "*/*"),
@@ -200,14 +161,14 @@
       bestInputMultiple: !!input?.multiple,
       visibleAttachmentButton: !!findAttachmentButton(),
       visibleUploadMenuItem: !!findUploadMenuItem(),
-      bridgeAvailable: !!window.AIHubNativeFiles,
-      stagedCount: window.AIHubNativeFiles?.count?.() || 0,
+      liveFilesCount: liveCount,
       lastAttachedCount: Number(state.lastAttachedCount || 0),
       lastAttachedAgeMs: state.lastAttachedAt ? Math.max(0, Date.now() - state.lastAttachedAt) : -1,
       lastInputAccept: state.lastInputAccept || "",
       lastInputMultiple: !!state.lastInputMultiple,
       lastStrategy: state.lastStrategy || "",
       lastPrepare: state.lastPrepare || "",
+      lastPicker: state.lastPicker || "",
       pathHash: simpleHash(location.pathname)
     };
   };

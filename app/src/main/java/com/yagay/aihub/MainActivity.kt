@@ -12,6 +12,8 @@ import com.yagay.aihub.ui.theme.AIHubTheme
 import com.yagay.aihub.web.WebRuntime
 
 class MainActivity : ComponentActivity() {
+    private val webRuntime by lazy { WebRuntime(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DiagnosticLogger.i("ACTIVITY", "MainActivity.onCreate restored=${savedInstanceState != null}")
@@ -19,8 +21,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             AIHubTheme {
                 val vm: AIHubViewModel = viewModel(factory = AIHubViewModel.Factory(application))
-                AIHubRoot(viewModel = vm, runtimeFactory = { WebRuntime(this) })
+                AIHubRoot(viewModel = vm, runtimeFactory = { webRuntime })
             }
         }
+    }
+
+    override fun onPause() {
+        webRuntime.flushCookies()
+        super.onPause()
     }
 }

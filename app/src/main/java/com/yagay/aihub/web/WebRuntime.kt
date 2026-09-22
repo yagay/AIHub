@@ -2,14 +2,18 @@ package com.yagay.aihub.web
 
 import android.Manifest
 import android.app.Activity
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Environment
+import android.provider.OpenableColumns
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -20,17 +24,17 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.yagay.aihub.data.ConversationBindingStore
 import com.yagay.aihub.data.PendingAttachmentStore
 import com.yagay.aihub.diagnostics.DiagnosticLogger
+import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ProviderSpec
 import com.yagay.aihub.model.SessionKey
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -63,13 +67,15 @@ class WebRuntime(private val context: Context) {
     private val bindingStore = ConversationBindingStore(context.applicationContext)
     private val pendingAttachmentStore = PendingAttachmentStore(context.applicationContext)
     private val webViews = linkedMapOf<String, WebView>()
-    private val attachmentBridges = linkedMapOf<String, NativeAttachmentBridge>()
     private val restoredKeys = mutableSetOf<String>()
     private val preferredUrls = mutableMapOf<String, String>()
+    private val runtimeInjectedKeys = mutableSetOf<String>()
     private var fileChooserLauncher: ((Intent) -> Unit)? = null
+    private var fileSelectionListener: ((SessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)? = null
     private var pageChangeListener: ((SessionKey, ProviderSpec, String) -> Unit)? = null
     private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
-    private var pendingFileProvider: String? = null
+    private var pendingFileSession: SessionKey? = null
+    private var pendingFileProvider: ProviderSpec? = null
 
     init {
         DiagnosticLogger.i("WEB", "runtime_created multiProfile=$supportsMultiProfile")
@@ -83,13 +89,18 @@ class WebRuntime(private val context: Context) {
         DiagnosticLogger.d("FILE", "file_chooser_launcher_set available=${launcher != null}")
     }
 
+    fun setFileSelectionListener(listener: ((SessionKey, ProviderSpec, List<AttachmentMeta>) -> Unit)?) {
+        fileSelectionListener = listener
+    }
+
     fun setPageChangeListener(listener: ((SessionKey, ProviderSpec, String) -> Unit)?) {
         pageChangeListener = listener
     }
 
     fun handleFileChooserResult(resultCode: Int, data: Intent?) {
         val callback = pendingFileCallback ?: return
-        val provider = pendingFileProvider.orEmpty()
+        val session = pendingFileSession
+        val provider = pendingFileProvider
         val uris = if (resultCode == Activity.RESULT_OK) {
             when {
                 data?.clipData != null -> {
@@ -103,11 +114,25 @@ class WebRuntime(private val context: Context) {
 
         DiagnosticLogger.i(
             "FILE",
-            "file_chooser_result provider=$provider resultCode=$resultCode selected=${uris?.size ?: 0}"
+            "file_chooser_result provider=${provider?.id.orEmpty()} resultCode=$resultCode selected=${uris?.size ?: 0}"
         )
+
         callback.onReceiveValue(uris)
+
+        if (session != null && provider != null && !uris.isNullOrEmpty()) {
+            val attachments = uris.mapIndexed { index, uri -> queryAttachmentMeta(uri, index) }
+            pendingAttachmentStore.save(session, attachments)
+            fileSelectionListener?.invoke(session, provider, attachments)
+            DiagnosticLogger.i(
+                "FILE",
+                "file_chooser_attached provider=${provider.id} selected=${attachments.size} names=${attachments.joinToString("|") { it.name }.take(240)}"
+            )
+        }
+
         pendingFileCallback = null
+        pendingFileSession = null
         pendingFileProvider = null
+        flushCookies()
     }
 
     fun attach(
@@ -122,12 +147,14 @@ class WebRuntime(private val context: Context) {
         if (restored != null) preferredUrls[key] = restored
 
         val webView = obtain(session, provider)
-        (webView.parent as? ViewGroup)?.removeView(webView)
-        host.removeAllViews()
-        host.addView(
-            webView,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        )
+        if (webView.parent !== host || host.childCount != 1 || host.getChildAt(0) !== webView) {
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            host.removeAllViews()
+            host.addView(
+                webView,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+        }
 
         if (!restoredKeys.contains(key)) {
             restoredKeys += key
@@ -150,85 +177,6 @@ class WebRuntime(private val context: Context) {
         val result = call(session, provider, "isLoggedIn") == "true"
         DiagnosticLogger.d("WEB", "login_check provider=${provider.id} result=$result")
         return result
-    }
-
-    suspend fun attachFiles(
-        session: SessionKey,
-        provider: ProviderSpec,
-        uris: List<Uri>
-    ): AttachmentAttachResult {
-        if (uris.isEmpty()) {
-            pendingAttachmentStore.clear(session)
-            return AttachmentAttachResult(0, emptyList(), "no-selection")
-        }
-        ensureLoaded(session, provider)
-        val key = webViewKey(session, provider)
-        val bridge = attachmentBridges[key]
-            ?: run {
-                pendingAttachmentStore.clear(session)
-                return AttachmentAttachResult(0, emptyList(), "bridge-unavailable")
-            }
-
-        val staged = runCatching {
-            withContext(Dispatchers.IO) { bridge.stage(uris) }
-        }.onFailure {
-            DiagnosticLogger.e("FILE", "attachment_stage_failed provider=${provider.id}", it)
-        }.getOrElse {
-            pendingAttachmentStore.clear(session)
-            return AttachmentAttachResult(0, emptyList(), "stage-failed")
-        }
-
-        DiagnosticLogger.i(
-            "FILE",
-            "attachment_stage_ready provider=${provider.id} selected=${staged.names.size} totalBytes=${staged.totalBytes}"
-        )
-        if (staged.names.isEmpty()) {
-            bridge.clearNative()
-            pendingAttachmentStore.clear(session)
-            return AttachmentAttachResult(0, emptyList(), "empty-stage")
-        }
-
-        var result = call(session, provider, "attachStagedFiles")
-        if (result == "no-input") {
-            val prepared = call(session, provider, "prepareAttachmentInput")
-            DiagnosticLogger.d(
-                "FILE",
-                "attachment_prepare_input provider=${provider.id} result=${prepared ?: "null"}"
-            )
-            delay(350)
-            result = call(session, provider, "attachStagedFiles")
-            if (result == "no-input") {
-                delay(550)
-                result = call(session, provider, "attachStagedFiles")
-            }
-        }
-
-        val attachedCount = result
-            ?.takeIf { it.startsWith("attached:") }
-            ?.substringAfter(':')
-            ?.toIntOrNull()
-            ?: 0
-
-        val probe = call(session, provider, "attachmentProbe").orEmpty()
-        if (attachedCount > 0) {
-            val attachedMetadata = staged.attachments.take(attachedCount)
-            val attachedNames = attachedMetadata.map { it.name }
-            pendingAttachmentStore.save(session, attachedMetadata)
-            DiagnosticLogger.i(
-                "FILE",
-                "attachment_injected provider=${provider.id} attached=$attachedCount selected=${staged.names.size} metadata=${attachedMetadata.size} probe=${DiagnosticLogger.scrub(probe).take(800)}"
-            )
-            bridge.clearNative()
-            return AttachmentAttachResult(attachedCount, attachedNames)
-        }
-
-        DiagnosticLogger.w(
-            "FILE",
-            "attachment_injection_failed provider=${provider.id} result=${result ?: "null"} probe=${DiagnosticLogger.scrub(probe).take(1000)}"
-        )
-        bridge.clearNative()
-        pendingAttachmentStore.clear(session)
-        return AttachmentAttachResult(0, emptyList(), result ?: "null-result")
     }
 
     suspend fun openAttachmentPicker(session: SessionKey, provider: ProviderSpec): Boolean {
@@ -385,23 +333,39 @@ class WebRuntime(private val context: Context) {
         DiagnosticLogger.i("WEB", "adapter_stop provider=${provider.id} result=${result ?: "null"}")
     }
 
+    fun canGoBack(session: SessionKey, provider: ProviderSpec): Boolean =
+        webViews[webViewKey(session, provider)]?.canGoBack() == true
+
+    fun goBack(session: SessionKey, provider: ProviderSpec): Boolean {
+        val webView = webViews[webViewKey(session, provider)] ?: return false
+        if (!webView.canGoBack()) return false
+        webView.goBack()
+        return true
+    }
+
+    fun flushCookies() {
+        runCatching { CookieManager.getInstance().flush() }
+            .onFailure { DiagnosticLogger.e("WEB", "cookie_flush_failed", it) }
+    }
+
     fun destroy() {
         DiagnosticLogger.i("WEB", "runtime_destroy webViews=${webViews.size}")
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
+        pendingFileSession = null
         pendingFileProvider = null
+        fileSelectionListener = null
         pageChangeListener = null
-        attachmentBridges.values.forEach { it.clearNative() }
-        attachmentBridges.clear()
+        flushCookies()
         webViews.values.forEach { webView ->
             (webView.parent as? ViewGroup)?.removeView(webView)
-            runCatching { webView.removeJavascriptInterface("AIHubNativeFiles") }
             webView.stopLoading()
             webView.destroy()
         }
         webViews.clear()
         restoredKeys.clear()
         preferredUrls.clear()
+        runtimeInjectedKeys.clear()
     }
 
     private fun webViewKey(session: SessionKey, provider: ProviderSpec): String =
@@ -420,18 +384,20 @@ class WebRuntime(private val context: Context) {
                         .onFailure { DiagnosticLogger.e("WEB", "set_profile_failed provider=${provider.id}", it) }
                 }
 
-                val nativeAttachmentBridge = NativeAttachmentBridge(context.applicationContext)
-                attachmentBridges[key] = nativeAttachmentBridge
-                addJavascriptInterface(nativeAttachmentBridge, "AIHubNativeFiles")
-
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                settings.databaseEnabled = true
+                settings.databaseEnabled = false
                 settings.loadsImagesAutomatically = true
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.setGeolocationEnabled(false)
+                settings.saveFormData = false
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 settings.mediaPlaybackRequiresUserGesture = false
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.setSupportMultipleWindows(false)
+                settings.userAgentString = compatibleUserAgent(settings.userAgentString)
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
@@ -467,7 +433,8 @@ class WebRuntime(private val context: Context) {
 
                         pendingFileCallback?.onReceiveValue(null)
                         pendingFileCallback = filePathCallback
-                        pendingFileProvider = provider.id
+                        pendingFileSession = session
+                        pendingFileProvider = provider
 
                         val intent = runCatching { fileChooserParams.createIntent() }.getOrElse {
                             Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -486,7 +453,7 @@ class WebRuntime(private val context: Context) {
 
                         DiagnosticLogger.i(
                             "FILE",
-                            "file_chooser_open provider=${provider.id} mode=${fileChooserParams.mode} accepts=${fileChooserParams.acceptTypes.filter { it.isNotBlank() }.joinToString("|").take(240)}"
+                            "file_chooser_open provider=${provider.id} account=${session.accountId.take(12)} mode=${fileChooserParams.mode} accepts=${fileChooserParams.acceptTypes.filter { it.isNotBlank() }.joinToString("|").take(240)}"
                         )
                         return runCatching {
                             launcher(intent)
@@ -515,6 +482,7 @@ class WebRuntime(private val context: Context) {
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                        runtimeInjectedKeys.remove(key)
                         DiagnosticLogger.i("WEB", "page_started provider=${provider.id} url=${safeUrl(url)}")
                         super.onPageStarted(view, url, favicon)
                     }
@@ -567,6 +535,16 @@ class WebRuntime(private val context: Context) {
                         super.onReceivedHttpError(view, request, errorResponse)
                     }
                 }
+
+                setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                    enqueueDownload(
+                        webView = this,
+                        url = url,
+                        userAgent = userAgent,
+                        contentDisposition = contentDisposition,
+                        mimeType = mimeType
+                    )
+                }
             }
         }
     }
@@ -609,14 +587,19 @@ class WebRuntime(private val context: Context) {
         action: String,
         argumentJs: String? = null
     ): String? {
+        ensureLoaded(session, provider)
         val webView = obtain(session, provider)
-        val source = loader.providerScript(provider.scriptAsset)
+        if (!ensureRuntimeInjected(session, provider, webView)) return null
+
         val invocation = if (argumentJs == null) "$action()" else "$action($argumentJs)"
         val js = """
             (() => {
               try {
-                $source
-                const value = window.__AIHUB__.$invocation;
+                const api = window.__AIHUB__;
+                if (!api || typeof api.$action !== "function") {
+                  return JSON.stringify({ ok: false, error: "action-unavailable" });
+                }
+                const value = api.$invocation;
                 return JSON.stringify({ ok: true, value: value });
               } catch (error) {
                 return JSON.stringify({ ok: false, error: String(error) });
@@ -651,6 +634,53 @@ class WebRuntime(private val context: Context) {
         }
     }
 
+    private suspend fun ensureRuntimeInjected(
+        session: SessionKey,
+        provider: ProviderSpec,
+        webView: WebView
+    ): Boolean {
+        val key = webViewKey(session, provider)
+        if (key in runtimeInjectedKeys) {
+            val stillPresent = evalRaw(
+                webView,
+                "typeof window.__AIHUB__ === 'object' && typeof window.__AIHUB__.generationState === 'function'"
+            ) == "true"
+            if (stillPresent) return true
+            runtimeInjectedKeys.remove(key)
+        }
+
+        val source = loader.providerScript(provider.scriptAsset)
+        val result = evalRaw(
+            webView,
+            """
+                (() => {
+                  try {
+                    $source
+                    return typeof window.__AIHUB__ === "object" &&
+                      typeof window.__AIHUB__.generationState === "function";
+                  } catch (error) {
+                    console.error("AIHub runtime injection failed", error);
+                    return false;
+                  }
+                })();
+            """.trimIndent()
+        )
+        val ready = result == "true"
+        if (ready) {
+            runtimeInjectedKeys += key
+            DiagnosticLogger.i(
+                "JS",
+                "runtime_injected provider=${provider.id} account=${session.accountId.take(12)} bytes=${source.length}"
+            )
+        } else {
+            DiagnosticLogger.w(
+                "JS",
+                "runtime_injection_failed provider=${provider.id} account=${session.accountId.take(12)} result=${result ?: "null"}"
+            )
+        }
+        return ready
+    }
+
     private suspend fun evalRaw(webView: WebView, script: String): String? =
         suspendCoroutine { continuation ->
             runCatching {
@@ -673,6 +703,78 @@ class WebRuntime(private val context: Context) {
                 continuation.resume(null)
             }
         }
+
+    private fun enqueueDownload(
+        webView: WebView,
+        url: String,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimeType: String?
+    ) {
+        val uri = runCatching { Uri.parse(url) }.getOrNull()
+        if (uri == null || (uri.scheme != "https" && uri.scheme != "http")) {
+            DiagnosticLogger.w("DOWNLOAD", "unsupported_download_scheme url=${safeUrl(url)}")
+            return
+        }
+
+        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+        runCatching {
+            val request = DownloadManager.Request(uri).apply {
+                setTitle(fileName)
+                setDescription("AIHub download")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(false)
+                if (!mimeType.isNullOrBlank()) setMimeType(mimeType)
+                val cookie = CookieManager.getInstance().getCookie(url)
+                if (!cookie.isNullOrBlank()) addRequestHeader("Cookie", cookie)
+                val ua = userAgent?.takeIf { it.isNotBlank() } ?: webView.settings.userAgentString
+                if (!ua.isNullOrBlank()) addRequestHeader("User-Agent", ua)
+                webView.url?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                    ?.let { addRequestHeader("Referer", it) }
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            }
+            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val id = manager.enqueue(request)
+            DiagnosticLogger.i(
+                "DOWNLOAD",
+                "download_enqueued id=$id file=${DiagnosticLogger.scrub(fileName, 180)} mime=${mimeType.orEmpty()}"
+            )
+            Toast.makeText(context, "开始下载：$fileName", Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            DiagnosticLogger.e("DOWNLOAD", "download_enqueue_failed file=${DiagnosticLogger.scrub(fileName, 180)}", it)
+            Toast.makeText(context, "下载失败：$fileName", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun queryAttachmentMeta(uri: Uri, index: Int): AttachmentMeta {
+        var name = ""
+        var size = 0L
+        runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (nameIndex >= 0) name = cursor.getString(nameIndex).orEmpty()
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+        return AttachmentMeta(
+            name = name.ifBlank { uri.lastPathSegment?.substringAfterLast('/') ?: "attachment-${index + 1}" },
+            mimeType = context.contentResolver.getType(uri).orEmpty().ifBlank { "application/octet-stream" },
+            sizeBytes = size
+        )
+    }
+
+    private fun compatibleUserAgent(base: String): String =
+        base.replace("; wv", "").replace("Version/4.0 ", "")
 
     private fun parseResponseSnapshot(raw: String): ResponseSnapshot {
         val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return ResponseSnapshot()

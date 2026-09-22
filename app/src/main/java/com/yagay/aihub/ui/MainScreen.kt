@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -108,44 +109,6 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         runtime.handleFileChooserResult(result.resultCode, result.data)
-    }
-
-    val nativeAttachmentPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isEmpty()) {
-            DiagnosticLogger.i("FILE", "native_attachment_selection_cancelled")
-        } else {
-            val provider = viewModel.selectedProvider
-            val targetSession = viewModel.session
-            DiagnosticLogger.i("FILE", "native_attachment_selected provider=${provider.id} selected=${uris.size}")
-            scope.launch {
-                val result = runCatching {
-                    runtime.attachFiles(targetSession, provider, uris)
-                }.onFailure {
-                    DiagnosticLogger.e("FILE", "native_attachment_injection_exception provider=${provider.id}", it)
-                }.getOrNull()
-
-                if (result != null && result.attachedCount > 0) {
-                    pendingAttachmentCount = result.attachedCount
-                    pendingAttachmentNames = result.names
-                    Toast.makeText(
-                        context,
-                        "已添加 ${result.attachedCount} 个附件到 ${provider.name}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else {
-                    pendingAttachmentCount = 0
-                    pendingAttachmentNames = emptyList()
-                    Toast.makeText(
-                        context,
-                        "${provider.name} 当前页面没有接受附件，已打开官网供你检查。",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    viewModel.openWeb()
-                }
-            }
-        }
     }
 
     val exportDiagnostics = rememberLauncherForActivityResult(
@@ -255,9 +218,32 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
 
     DisposableEffect(runtime) {
         runtime.setFileChooserLauncher { intent -> webFileChooser.launch(intent) }
+        runtime.setFileSelectionListener { targetSession, provider, attachments ->
+            if (targetSession == viewModel.session && provider.id == viewModel.selectedProvider.id) {
+                pendingAttachmentCount = attachments.size
+                pendingAttachmentNames = attachments.map { it.name }
+                Toast.makeText(
+                    context,
+                    "已添加 ${attachments.size} 个附件到 ${provider.name}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+        runtime.setPageChangeListener { targetSession, provider, url ->
+            viewModel.onWebPageChanged(targetSession, provider, url)
+        }
         onDispose {
             runtime.setFileChooserLauncher(null)
+            runtime.setFileSelectionListener(null)
+            runtime.setPageChangeListener(null)
             runtime.destroy()
+        }
+    }
+
+    BackHandler(enabled = viewModel.showWeb) {
+        if (!runtime.goBack(viewModel.session, viewModel.selectedProvider)) {
+            runtime.flushCookies()
+            viewModel.closeWeb()
         }
     }
 
@@ -352,6 +338,7 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     attachmentNames = pendingAttachmentNames,
                     onAttach = {
                         val provider = viewModel.selectedProvider
+                        val targetSession = viewModel.session
                         DiagnosticLogger.i(
                             "FILE",
                             "attachment_button_tapped provider=${provider.id} generating=${viewModel.isGenerating}"
@@ -359,7 +346,22 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                         if (viewModel.isGenerating) {
                             Toast.makeText(context, "${provider.name} 正在生成，请等待或停止后再添加附件。", Toast.LENGTH_SHORT).show()
                         } else {
-                            nativeAttachmentPicker.launch(arrayOf("*/*"))
+                            scope.launch {
+                                val opened = runCatching {
+                                    runtime.openAttachmentPicker(targetSession, provider)
+                                }.onFailure {
+                                    DiagnosticLogger.e("FILE", "attachment_picker_exception provider=${provider.id}", it)
+                                }.getOrDefault(false)
+
+                                if (!opened) {
+                                    Toast.makeText(
+                                        context,
+                                        "${provider.name} 当前页面没有找到附件入口，已打开官网。",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    viewModel.openWeb()
+                                }
+                            }
                         }
                     },
                     onSend = {
@@ -669,12 +671,12 @@ private fun WebHost(runtime: WebRuntime, viewModel: AIHubViewModel, visible: Boo
         if (visible) {
             Surface(tonalElevation = 5.dp, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter)) {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.closeWeb() }) { Icon(Icons.Default.ArrowBack, "返回聊天") }
+                    IconButton(onClick = { runtime.flushCookies(); viewModel.closeWeb() }) { Icon(Icons.Default.ArrowBack, "返回聊天") }
                     Column(Modifier.weight(1f)) {
                         Text("${viewModel.selectedProvider.name} · ${viewModel.selectedAccount.label}", fontWeight = FontWeight.SemiBold)
                         Text("在官方网页完成登录、附件或特殊操作", style = MaterialTheme.typography.labelSmall)
                     }
-                    Button(onClick = { viewModel.closeWeb() }) { Text("返回聊天") }
+                    Button(onClick = { runtime.flushCookies(); viewModel.closeWeb() }) { Text("返回聊天") }
                 }
             }
         }
