@@ -2,14 +2,14 @@ package com.yagay.aihub.data
 
 import android.content.Context
 import com.yagay.aihub.model.AttachmentMeta
-import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.WindowSessionKey
 import org.json.JSONArray
 import org.json.JSONObject
 
 class PendingAttachmentStore(context: Context) {
     private val prefs = context.getSharedPreferences("aihub_pending_attachments", Context.MODE_PRIVATE)
 
-    fun save(session: SessionKey, attachments: List<AttachmentMeta>) {
+    fun save(session: WindowSessionKey, attachments: List<AttachmentMeta>) {
         val array = JSONArray()
         attachments.forEach { item ->
             array.put(
@@ -23,7 +23,7 @@ class PendingAttachmentStore(context: Context) {
         prefs.edit().putString(session.storageKey, array.toString()).apply()
     }
 
-    fun load(session: SessionKey): List<AttachmentMeta> = runCatching {
+    fun load(session: WindowSessionKey): List<AttachmentMeta> = runCatching {
         val array = JSONArray(prefs.getString(session.storageKey, "[]") ?: "[]")
         buildList {
             for (i in 0 until array.length()) {
@@ -40,13 +40,13 @@ class PendingAttachmentStore(context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    fun consume(session: SessionKey): List<AttachmentMeta> {
+    fun consume(session: WindowSessionKey): List<AttachmentMeta> {
         val result = load(session)
         clear(session)
         return result
     }
 
-    fun clear(session: SessionKey) {
+    fun clear(session: WindowSessionKey) {
         prefs.edit().remove(session.storageKey).apply()
     }
 }
