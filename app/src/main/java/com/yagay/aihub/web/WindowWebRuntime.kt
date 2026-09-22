@@ -7,13 +7,13 @@ import android.widget.FrameLayout
 import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ChatWindow
 import com.yagay.aihub.model.ProviderSpec
-import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.WindowSessionKey
 
 class WindowWebRuntime(context: Context) {
     private val runtime = WebRuntime(context, useProfiles = false)
 
     private fun session(windowId: String, providerId: String) =
-        SessionKey(providerId = providerId, accountId = windowId)
+        WindowSessionKey(providerId = providerId, windowId = windowId)
 
     fun setFileChooserLauncher(launcher: ((Intent) -> Unit)?) =
         runtime.setFileChooserLauncher(launcher)
@@ -24,7 +24,7 @@ class WindowWebRuntime(context: Context) {
         runtime.setFileSelectionListener(
             listener?.let { target ->
                 { session, provider, attachments ->
-                    target(session.accountId, provider, attachments)
+                    target(session.windowId, provider, attachments)
                 }
             }
         )
@@ -36,7 +36,7 @@ class WindowWebRuntime(context: Context) {
         runtime.setPageChangeListener(
             listener?.let { target ->
                 { session, provider, url ->
-                    target(session.accountId, provider, url)
+                    target(session.windowId, provider, url)
                 }
             }
         )
