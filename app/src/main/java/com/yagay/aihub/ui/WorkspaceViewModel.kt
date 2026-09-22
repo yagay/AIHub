@@ -19,7 +19,7 @@ import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.ChatWindow
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.model.ProviderSpec
-import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.WindowSessionKey
 import com.yagay.aihub.model.WindowViewMode
 import com.yagay.aihub.provider.ProviderCatalog
 import com.yagay.aihub.web.WebRuntime
@@ -400,10 +400,10 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     private fun createWindowModel(providerId: String): ChatWindow =
         ChatWindow(providerId = providerId, title = "新对话")
 
-    private fun session(window: ChatWindow): SessionKey =
-        SessionKey(
+    private fun session(window: ChatWindow): WindowSessionKey =
+        WindowSessionKey(
             providerId = window.providerId,
-            accountId = window.id
+            windowId = window.id
         )
 
     class Factory(
