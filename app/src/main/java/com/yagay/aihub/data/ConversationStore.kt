@@ -4,14 +4,14 @@ import android.content.Context
 import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
-import com.yagay.aihub.model.SessionKey
+import com.yagay.aihub.model.WindowSessionKey
 import org.json.JSONArray
 import org.json.JSONObject
 
 class ConversationStore(context: Context) {
     private val prefs = context.getSharedPreferences("aihub_conversations", Context.MODE_PRIVATE)
 
-    fun load(session: SessionKey): List<ChatMessage> = runCatching {
+    fun load(session: WindowSessionKey): List<ChatMessage> = runCatching {
         val array = JSONArray(prefs.getString(session.storageKey, "[]") ?: "[]")
         buildList {
             for (i in 0 until array.length()) {
@@ -43,7 +43,7 @@ class ConversationStore(context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    fun save(session: SessionKey, messages: List<ChatMessage>) {
+    fun save(session: WindowSessionKey, messages: List<ChatMessage>) {
         val array = JSONArray()
         messages.takeLast(200).forEach { message ->
             val attachments = JSONArray()
@@ -68,7 +68,7 @@ class ConversationStore(context: Context) {
         prefs.edit().putString(session.storageKey, array.toString()).apply()
     }
 
-    fun clear(session: SessionKey) {
+    fun clear(session: WindowSessionKey) {
         prefs.edit().remove(session.storageKey).apply()
     }
 }
