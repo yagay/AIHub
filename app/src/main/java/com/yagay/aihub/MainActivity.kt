@@ -30,4 +30,14 @@ class MainActivity : ComponentActivity() {
         webRuntime.flushCookies()
         super.onPause()
     }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (!webRuntime.handleAndroidPermissionResult(requestCode, permissions, grantResults)) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        }
+    }
 }

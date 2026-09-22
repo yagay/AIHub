@@ -125,7 +125,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
         if ((text.isBlank() && attachmentCount <= 0) || isSessionGenerating(currentSession)) return
 
         val storedAttachments = if (attachmentCount > 0) {
-            pendingAttachmentStore.consume(currentSession).take(attachmentCount)
+            pendingAttachmentStore.load(currentSession).take(attachmentCount)
         } else {
             emptyList()
         }
@@ -186,6 +186,9 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 return@launchGeneration
             }
 
+            if (attachmentCount > 0) {
+                runtime.markAttachmentsSubmitted(currentSession, provider)
+            }
             runtime.currentUrl(currentSession, provider)?.let { bindingStore.saveUrl(currentSession, it) }
             DiagnosticLogger.i(
                 "CHAT",
@@ -261,6 +264,7 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
                 conversationStore.clear(currentSession)
                 bindingStore.clear(currentSession)
                 pendingAttachmentStore.clear(currentSession)
+                runtime.markAttachmentsSubmitted(currentSession, provider)
                 unreadSessions[currentSession.storageKey] = false
                 if (isCurrentSession(currentSession)) messages.clear()
             }
@@ -280,6 +284,31 @@ class AIHubViewModel(application: Application) : AndroidViewModel(application) {
             runtime.stop(currentSession, provider)
             setGenerating(currentSession, false)
             setStatus(currentSession, "已请求停止生成")
+        }
+    }
+
+    fun resetWebSession(runtime: WebRuntime) {
+        val current = session
+        val provider = selectedProvider
+        generationJobs.remove(current.storageKey)?.cancel()
+        setGenerating(current, false)
+        bindingStore.clear(current)
+        pendingAttachmentStore.clear(current)
+        runtime.resetSession(current, provider)
+        showWeb = true
+        setStatus(current, "网页登录状态已重置，请重新登录 ${provider.name}。")
+    }
+
+    fun onRuntimeDisposed() {
+        val affected = generationJobs.keys.toList()
+        generationJobs.values.forEach { it.cancel() }
+        generationJobs.clear()
+        affected.forEach { key ->
+            generatingSessions.remove(key)
+            sessionStatuses[key] = "网页运行环境已重建，请重试当前操作。"
+        }
+        if (affected.isNotEmpty()) {
+            DiagnosticLogger.w("VM", "runtime_disposed cancelledJobs=${affected.size}")
         }
     }
 

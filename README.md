@@ -74,3 +74,14 @@ Website DOMs change frequently. The architecture intentionally keeps selectors o
 ## Next layers
 
 The new baseline is ready for richer Markdown, file upload, provider model controls, remote adapter rule updates, conversation export, background execution and an optional local OpenAI-compatible endpoint.
+
+
+## Web runtime hardening
+
+- Provider-aware WebView policy keeps provider/auth navigation in-app and sends ordinary external links to the system browser.
+- Standard WebView file chooser is used for attachments; AIHub confirms the website accepted the selection before showing it as pending.
+- Pending attachments are retained until the official website acknowledges submission.
+- Web microphone/camera permission requests can trigger Android runtime permissions and resume the original WebView request.
+- Multi-Profile cookie/WebStorage reset is scoped to the selected account when supported.
+- HTTP(S), data URL and WebView blob downloads are handled without the old Base64 upload bridge.
+- Common configuration changes are handled without recreating the activity, and active jobs are cancelled safely if the Web runtime is disposed.

@@ -104,6 +104,7 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
     var optionKind by remember { mutableStateOf<String?>(null) }
     var optionValues by remember { mutableStateOf<List<String>>(emptyList()) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmResetWeb by remember { mutableStateOf(false) }
 
     val webFileChooser = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -222,11 +223,13 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
             if (targetSession == viewModel.session && provider.id == viewModel.selectedProvider.id) {
                 pendingAttachmentCount = attachments.size
                 pendingAttachmentNames = attachments.map { it.name }
-                Toast.makeText(
-                    context,
-                    "已添加 ${attachments.size} 个附件到 ${provider.name}",
-                    Toast.LENGTH_SHORT
-                ).show()
+                if (attachments.isNotEmpty()) {
+                    Toast.makeText(
+                        context,
+                        "已添加 ${attachments.size} 个附件到 ${provider.name}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
         runtime.setPageChangeListener { targetSession, provider, url ->
@@ -236,6 +239,7 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
             runtime.setFileChooserLauncher(null)
             runtime.setFileSelectionListener(null)
             runtime.setPageChangeListener(null)
+            viewModel.onRuntimeDisposed()
             runtime.destroy()
         }
     }
@@ -291,6 +295,16 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     selected = false,
                     onClick = { showAddAccount = true },
                     icon = { Icon(Icons.Default.Add, null) },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                NavigationDrawerItem(
+                    label = { Text("重置当前网页登录") },
+                    selected = false,
+                    onClick = {
+                        confirmResetWeb = true
+                        scope.launch { drawerState.close() }
+                    },
+                    icon = { Icon(Icons.Outlined.DeleteSweep, null) },
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
                 NavigationDrawerItem(
@@ -369,8 +383,6 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                         val attachments = pendingAttachmentCount
                         prompt = ""
                         viewModel.send(value, runtime, attachments)
-                        pendingAttachmentCount = 0
-                        pendingAttachmentNames = emptyList()
                     },
                     onStop = { viewModel.stop(runtime) }
                 )
@@ -441,6 +453,27 @@ fun AIHubRoot(viewModel: AIHubViewModel, runtimeFactory: () -> WebRuntime) {
                     delay(260)
                     refreshCapabilities(openDialog = false)
                 }
+            }
+        )
+    }
+
+    if (confirmResetWeb) {
+        AlertDialog(
+            onDismissRequest = { confirmResetWeb = false },
+            title = { Text("重置当前网页登录？") },
+            text = {
+                Text(
+                    "将清除当前 ${viewModel.selectedProvider.name} · ${viewModel.selectedAccount.label} 的网页登录和网站存储，然后重新打开官网。其他 Multi-Profile 账号不会被清除。"
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmResetWeb = false
+                    viewModel.resetWebSession(runtime)
+                }) { Text("重置并重新登录") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmResetWeb = false }) { Text("取消") }
             }
         )
     }
