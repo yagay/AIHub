@@ -858,6 +858,21 @@ class WebRuntime(private val context: Context, private val useProfiles: Boolean 
         val scheme = uri.scheme?.lowercase().orEmpty()
         if (scheme == "http" || scheme == "https") {
             if (!isMainFrame) return false
+
+            val host = uri.host?.lowercase().orEmpty()
+            if (host == "accounts.google.com" || host == "myaccount.google.com") {
+                DiagnosticLogger.w(
+                    "WEB",
+                    "google_auth_externalized provider=${provider.id} host=$host reason=embedded-user-agent-not-supported"
+                )
+                Toast.makeText(
+                    context,
+                    "Google 不允许在 Android WebView 中登录，已改用系统浏览器。浏览器登录状态不会自动同步回 AIHub。",
+                    Toast.LENGTH_LONG
+                ).show()
+                return openExternal(uri)
+            }
+
             val policy = ProviderWebPolicies.forProvider(provider)
             if (policy.allowsTopLevel(uri)) return false
 
