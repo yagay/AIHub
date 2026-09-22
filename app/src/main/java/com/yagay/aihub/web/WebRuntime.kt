@@ -186,7 +186,7 @@ class WebRuntime(private val context: Context) {
             "FILE",
             "attachment_picker_requested provider=${provider.id} result=${result ?: "null"}"
         )
-        if (result == "opened-input" || result == "opened-button") return true
+        if (result == "opened-input" || result == "opened-button" || result == "scheduled") return true
 
         val probe = call(session, provider, "attachmentProbe").orEmpty()
         DiagnosticLogger.w(
@@ -461,6 +461,7 @@ class WebRuntime(private val context: Context) {
                         }.onFailure {
                             pendingFileCallback?.onReceiveValue(null)
                             pendingFileCallback = null
+                            pendingFileSession = null
                             pendingFileProvider = null
                             DiagnosticLogger.e("FILE", "file_chooser_launch_failed provider=${provider.id}", it)
                         }.getOrDefault(false)
