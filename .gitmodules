@@ -1,0 +1,3 @@
+[submodule "vendor/YBrowser"]
+	path = vendor/YBrowser
+	url = https://github.com/yagay/YBrowser.git
