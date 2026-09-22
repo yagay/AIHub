@@ -11,8 +11,8 @@ android {
         applicationId = "com.yagay.aihub"
         minSdk = 26
         targetSdk = 37
-        versionCode = 20
-        versionName = "0.2.0"
+        versionCode = 21
+        versionName = "0.2.1"
     }
 
     buildFeatures {
