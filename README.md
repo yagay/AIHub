@@ -1,18 +1,75 @@
 # AIHub
 
-AIHub is a clean-room Android client that unifies official AI web apps behind one native chat UI.
+AIHub is a clean-room Android workspace for using official AI web apps through a native multi-window chat interface.
 
-## Architecture
+## Current architecture
 
-- **Native UI:** Kotlin + Jetpack Compose + Material 3.
-- **Provider/account layer:** one provider can have multiple accounts.
-- **Session isolation:** AndroidX WebKit Multi-Profile gives each account independent cookies and web storage when supported by the installed Android System WebView.
-- **Provider adapters:** DOM automation is isolated in `app/src/main/assets/providers/`.
-- **Official web apps:** authentication, subscriptions and model availability remain on the providers' official websites; web mode does not require provider API keys.
+AIHub 0.2.x is window-first.
 
-The implementation is clean-room code. Its architecture is inspired by the ideas behind modern Android AI clients, AI Bridge-style account separation, MultAI-style provider adapters, and robust Android WebView wrappers; source code from those projects is not copied into this repository.
+- **One login per provider.** AIHub no longer has an account-management layer.
+- **Multiple live chat windows.** Every open chat window owns its own WebView instance.
+- **No reload on normal window switch.** Switching tabs detaches the previous WebView from the visible container and attaches the selected WebView without calling `reload()`, `loadUrl()`, or `destroy()`.
+- **Shared provider login state.** Window WebViews intentionally use the shared WebView cookie jar, so ChatGPT windows share the same ChatGPT login, Claude windows share the same Claude login, and so on.
+- **Chat / Web dual view.** Each window can switch between AIHub's native chat view and the official website while keeping the same underlying WebView.
+- **Background generation.** A window can continue waiting for a provider response while another window is active; completed background windows can be marked unread.
+- **Persistent workspace.** Open windows, their provider, title, last conversation URL, active tab, and preferred Chat/Web mode are restored after app restart.
+- **Provider adapters stay isolated.** Website DOM logic remains in `app/src/main/assets/providers/`.
 
-## Initial providers
+## UI model
+
+```text
+AIHub Workspace
+│
+├─ Window tab strip
+│   ├─ ChatGPT · Upload issue
+│   ├─ ChatGPT · ListCleaner
+│   ├─ Claude · Architecture
+│   └─ +
+│
+├─ Active window
+│   ├─ Native Chat view
+│   └─ Official Web view
+│
+└─ Drawer
+    ├─ New window
+    ├─ ChatGPT windows
+    ├─ Claude windows
+    ├─ Gemini windows
+    ├─ Grok windows
+    ├─ DeepSeek windows
+    ├─ Qwen windows
+    └─ Diagnostics
+```
+
+## Runtime model
+
+```text
+WorkspaceViewModel
+       │
+       ├─ WindowStore
+       ├─ ConversationStore
+       └─ WindowWebRuntime
+              │
+              └─ WebRuntime
+                   ├─ windowId -> WebView
+                   ├─ Provider navigation policy
+                   ├─ Standard WebView file chooser
+                   ├─ Native attachment staging
+                   ├─ Microphone / camera permissions
+                   ├─ HTTP(S) / data / blob downloads
+                   └─ Provider JavaScript runtime
+```
+
+The important separation is:
+
+```text
+Provider login state  = shared WebView cookies
+Chat identity         = windowId
+Loaded page/DOM       = one persistent WebView per open window
+Native conversation   = one local conversation store per windowId
+```
+
+## Providers
 
 - ChatGPT
 - Claude
@@ -21,27 +78,55 @@ The implementation is clean-room code. Its architecture is inspired by the ideas
 - DeepSeek
 - Qwen
 
-## Flow
+Authentication, subscriptions, model access, provider limits, and website availability remain controlled by the providers' official websites.
+
+## Attachments
+
+AIHub supports both paths:
+
+1. The official website can invoke Android's standard WebView file chooser.
+2. AIHub's native attachment button opens Android's document picker and stages the selected files into the active provider page, then fills the website's real `input[type=file]`.
+
+The native UI only records the attachment after the provider page confirms that a file is present.
+
+## WebView lifecycle
+
+Open windows keep their WebView instances alive until the user closes the window or the runtime is destroyed.
+
+Normal switch:
 
 ```text
-Compose UI
-   ↓
-AIHubViewModel
-   ↓
-Provider + Account + SessionKey
-   ↓
-WebRuntime (Android WebView)
-   ↓
-Provider JavaScript adapter
-   ↓
-Official AI website
+Window A WebView
+   detach from host
+   keep instance alive
+
+Window B WebView
+   attach to host
+
+No reload
+No destroy
 ```
 
-Tap the globe icon to log into the selected official website. Return to the native chat screen and AIHub injects prompts and reads the latest assistant reply through that provider's adapter.
+Closing a window destroys only that window's WebView.
 
-## Multi-account
+## Provider adapter layout
 
-Each account maps to a dedicated AndroidX WebKit profile. If `MULTI_PROFILE` is unavailable in the installed WebView implementation, AIHub keeps one default session per provider and refuses creation of extra accounts rather than mixing cookies.
+```text
+app/src/main/assets/providers/
+├── common.js
+├── attachment.js
+├── response-state.js
+├── send-queue.js
+├── capabilities.js
+├── chatgpt.js
+├── claude.js
+├── gemini.js
+├── grok.js
+├── deepseek.js
+└── qwen.js
+```
+
+Website DOMs change frequently. Keeping selectors and website-specific automation outside the Compose UI lets provider breakage be repaired without rewriting the workspace architecture.
 
 ## Build
 
@@ -54,34 +139,15 @@ Each account maps to a dedicated AndroidX WebKit profile. If `MULTI_PROFILE` is 
 gradle :app:assembleDebug
 ```
 
-GitHub Actions builds and uploads `AIHub-debug` on every push to `main`.
+GitHub Actions validates every provider JavaScript file, builds the debug APK, and uploads the `AIHub-debug` artifact on every push to `main`.
 
-## Adapter layout
+## Design references
 
-```text
-app/src/main/assets/providers/
-├── common.js
-├── chatgpt.js
-├── claude.js
-├── gemini.js
-├── grok.js
-├── deepseek.js
-└── qwen.js
-```
+The implementation is clean-room code. Product and architecture ideas were studied from several open-source projects:
 
-Website DOMs change frequently. The architecture intentionally keeps selectors outside the Kotlin UI so provider breakage can be repaired by updating a small JavaScript adapter instead of rewriting the app.
+- Cherry Studio: conversation/topic + tab/window product model
+- ChatterUI: mobile chat screen and chat drawer patterns
+- EinkBro: WebView tab lifecycle and lazy browser-tab ideas
+- Fulguris: tab model / tab manager separation
 
-## Next layers
-
-The new baseline is ready for richer Markdown, file upload, provider model controls, remote adapter rule updates, conversation export, background execution and an optional local OpenAI-compatible endpoint.
-
-
-## Web runtime hardening
-
-- Provider-aware WebView policy keeps provider/auth navigation in-app and sends ordinary external links to the system browser.
-- Standard WebView file chooser is used for attachments; AIHub confirms the website accepted the selection before showing it as pending.
-- Pending attachments are retained until the official website acknowledges submission.
-- Web microphone/camera permission requests can trigger Android runtime permissions and resume the original WebView request.
-- Multi-Profile cookie/WebStorage reset is scoped to the selected account when supported.
-- HTTP(S), data URL and WebView blob downloads are handled without the old Base64 upload bridge.
-- Common configuration changes are handled without recreating the activity, and active jobs are cancelled safely if the Web runtime is disposed.
+AIHub does not copy those projects' source into its Android implementation.
