@@ -27,19 +27,13 @@ data class ProviderSpec(
     val scriptAsset: String
 )
 
-data class AccountProfile(
-    val id: String,
+data class WindowSessionKey(
     val providerId: String,
-    val label: String
-)
-
-data class SessionKey(
-    val providerId: String,
-    val accountId: String
+    val windowId: String
 ) {
-    val storageKey: String get() = "${providerId}_${accountId}"
+    val storageKey: String get() = "${providerId}_${windowId}"
     val webProfileName: String
-        get() = "aihub_${providerId}_${accountId}"
+        get() = "aihub_${providerId}_${windowId}"
             .lowercase()
             .replace(Regex("[^a-z0-9_]+"), "_")
 }
