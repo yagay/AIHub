@@ -156,7 +156,7 @@ class WindowWebRuntime(
             putExtra(EXTRA_WINDOW_ID, window.id)
             putExtra(EXTRA_PROVIDER_ID, provider.id)
             putExtra(EXTRA_WEB_ONLY, true)
-            (window.url)
+            (window.boundUrl ?: window.url)
                 ?.takeIf { it.isNotBlank() }
                 ?.let {
                     putExtra(EXTRA_URL, it)
@@ -493,7 +493,7 @@ class WindowWebRuntime(
             )
             window?.let {
                 putString(EXTRA_TITLE, it.title)
-                it.url
+                (it.boundUrl ?: it.url)
                     ?.takeIf { value ->
                         value.isNotBlank()
                     }
