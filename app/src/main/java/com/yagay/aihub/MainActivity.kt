@@ -1,7 +1,6 @@
 package com.yagay.aihub
 
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -35,10 +34,7 @@ class MainActivity : ComponentActivity() {
 
     private fun forwardToYBrowser(source: Intent?) {
         val forwarded = Intent().apply {
-            component = ComponentName(
-                YBROWSER_PACKAGE,
-                YBROWSER_AI_ACTIVITY,
-            )
+            setPackage(YBROWSER_PACKAGE)
             action = when (source?.action) {
                 ACTION_OPEN_AI_WEB ->
                     ACTION_YBROWSER_OPEN_AI_WEB
@@ -76,9 +72,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val YBROWSER_PACKAGE =
             "com.yagay.YBrowser"
-        private const val YBROWSER_AI_ACTIVITY =
-            "com.yagay.ybrowser.ai.AiWorkspaceActivity"
-
         private const val ACTION_OPEN_AI_WEB =
             "com.yagay.AIHub.action.OPEN_AI_WEB"
         private const val ACTION_YBROWSER_OPEN_AI =
