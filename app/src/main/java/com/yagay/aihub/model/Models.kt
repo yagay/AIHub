@@ -23,8 +23,7 @@ data class ProviderSpec(
     val id: String,
     val name: String,
     val shortName: String,
-    val homeUrl: String,
-    val scriptAsset: String
+    val homeUrl: String
 )
 
 data class WindowSessionKey(
