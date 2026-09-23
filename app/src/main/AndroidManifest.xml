@@ -3,8 +3,6 @@
 
     <queries>
         <package android:name="com.yagay.YBrowser" />
-        <provider
-            android:authorities="com.yagay.YBrowser.ai.bridge" />
     </queries>
 
     <application
@@ -16,10 +14,16 @@
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.yagay.AIHub.action.OPEN_AI" />
+                <action android:name="com.yagay.AIHub.action.CHATGPT_BINDING_SYNC" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
     </application>
