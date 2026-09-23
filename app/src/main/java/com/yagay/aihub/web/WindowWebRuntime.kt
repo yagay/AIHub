@@ -160,7 +160,6 @@ class WindowWebRuntime(
                 ?.takeIf { it.isNotBlank() }
                 ?.let {
                     putExtra(EXTRA_URL, it)
-                    putExtra(EXTRA_BOUND_URL, it)
                 }
             putExtra(EXTRA_TITLE, window.title)
             if (context !is Activity) {
@@ -482,10 +481,6 @@ class WindowWebRuntime(
                     ?.let { value ->
                         putString(
                             EXTRA_URL,
-                            value,
-                        )
-                        putString(
-                            EXTRA_BOUND_URL,
                             value,
                         )
                     }
