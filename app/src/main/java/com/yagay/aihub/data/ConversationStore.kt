@@ -1,74 +1,156 @@
 package com.yagay.aihub.data
 
 import android.content.Context
+import android.net.Uri
 import com.yagay.aihub.model.AttachmentMeta
 import com.yagay.aihub.model.ChatMessage
 import com.yagay.aihub.model.MessageRole
 import com.yagay.aihub.model.WindowSessionKey
 import org.json.JSONArray
-import org.json.JSONObject
 
+/**
+ * Read-only UI projection of YBrowser's conversation store.
+ *
+ * AIHub no longer owns persistent conversation data. save()/clear() are
+ * intentionally no-ops; provider/browser history is authoritative in
+ * YBrowser.
+ */
 class ConversationStore(context: Context) {
-    private val prefs = context.getSharedPreferences("aihub_conversations", Context.MODE_PRIVATE)
+    private val resolver =
+        context.applicationContext.contentResolver
 
-    fun load(session: WindowSessionKey): List<ChatMessage> = runCatching {
-        val array = JSONArray(prefs.getString(session.storageKey, "[]") ?: "[]")
-        buildList {
-            for (i in 0 until array.length()) {
-                val o = array.getJSONObject(i)
-                val attachments = buildList {
-                    val items = o.optJSONArray("attachments") ?: JSONArray()
-                    for (j in 0 until items.length()) {
-                        val item = items.optJSONObject(j) ?: continue
+    fun load(
+        session: WindowSessionKey,
+    ): List<ChatMessage> =
+        runCatching {
+            val uri = Uri.parse(
+                "$BASE_URI/$PATH_CONVERSATIONS/" +
+                    Uri.encode(session.windowId)
+            )
+
+            resolver.query(
+                uri,
+                null,
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                val idIndex =
+                    cursor.getColumnIndexOrThrow("id")
+                val roleIndex =
+                    cursor.getColumnIndexOrThrow("role")
+                val textIndex =
+                    cursor.getColumnIndexOrThrow("text")
+                val timestampIndex =
+                    cursor.getColumnIndexOrThrow(
+                        "timestamp"
+                    )
+                val attachmentsIndex =
+                    cursor.getColumnIndexOrThrow(
+                        "attachments"
+                    )
+
+                buildList {
+                    while (cursor.moveToNext()) {
                         add(
-                            AttachmentMeta(
-                                id = item.optString("id").ifBlank { "legacy-$i-$j" },
-                                name = item.optString("name").ifBlank { "attachment-${j + 1}" },
-                                mimeType = item.optString("mimeType", "application/octet-stream"),
-                                sizeBytes = item.optLong("sizeBytes", 0L)
+                            ChatMessage(
+                                id =
+                                    cursor.getString(
+                                        idIndex
+                                    ),
+                                role =
+                                    runCatching {
+                                        MessageRole.valueOf(
+                                            cursor.getString(
+                                                roleIndex
+                                            )
+                                        )
+                                    }.getOrDefault(
+                                        MessageRole.SYSTEM
+                                    ),
+                                text =
+                                    cursor.getString(
+                                        textIndex
+                                    ),
+                                timestamp =
+                                    cursor.getLong(
+                                        timestampIndex
+                                    ),
+                                attachments =
+                                    decodeAttachments(
+                                        cursor.getString(
+                                            attachmentsIndex
+                                        )
+                                    ),
                             )
                         )
                     }
                 }
-                add(
-                    ChatMessage(
-                        id = o.getString("id"),
-                        role = MessageRole.valueOf(o.getString("role")),
-                        text = o.getString("text"),
-                        timestamp = o.getLong("timestamp"),
-                        attachments = attachments
-                    )
-                )
-            }
-        }
-    }.getOrDefault(emptyList())
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
 
-    fun save(session: WindowSessionKey, messages: List<ChatMessage>) {
-        val array = JSONArray()
-        messages.takeLast(200).forEach { message ->
-            val attachments = JSONArray()
-            message.attachments.forEach { attachment ->
-                attachments.put(
-                    JSONObject()
-                        .put("id", attachment.id)
-                        .put("name", attachment.name)
-                        .put("mimeType", attachment.mimeType)
-                        .put("sizeBytes", attachment.sizeBytes)
-                )
-            }
-            array.put(
-                JSONObject()
-                    .put("id", message.id)
-                    .put("role", message.role.name)
-                    .put("text", message.text)
-                    .put("timestamp", message.timestamp)
-                    .put("attachments", attachments)
-            )
-        }
-        prefs.edit().putString(session.storageKey, array.toString()).apply()
+    fun save(
+        session: WindowSessionKey,
+        messages: List<ChatMessage>,
+    ) {
+        // YBrowser owns persistence. UI-only optimistic state is kept in
+        // WorkspaceViewModel until the bridge publishes the authoritative
+        // history update.
     }
 
     fun clear(session: WindowSessionKey) {
-        prefs.edit().remove(session.storageKey).apply()
+        // Closing an AIHub UI tab does not delete YBrowser/provider history.
+    }
+
+    private fun decodeAttachments(
+        raw: String,
+    ): List<AttachmentMeta> =
+        runCatching {
+            val array =
+                JSONArray(
+                    raw.ifBlank { "[]" }
+                )
+            buildList {
+                for (
+                    index in
+                    0 until array.length()
+                ) {
+                    val item =
+                        array.optJSONObject(index)
+                            ?: continue
+                    add(
+                        AttachmentMeta(
+                            id =
+                                item.optString("id")
+                                    .ifBlank {
+                                        "bridge-$index"
+                                    },
+                            name =
+                                item.optString("name")
+                                    .ifBlank {
+                                        "attachment-" +
+                                            (index + 1)
+                                    },
+                            mimeType =
+                                item.optString(
+                                    "mimeType",
+                                    "application/octet-stream",
+                                ),
+                            sizeBytes =
+                                item.optLong(
+                                    "sizeBytes",
+                                    0L,
+                                ),
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+
+    companion object {
+        private const val BASE_URI =
+            "content://com.yagay.YBrowser.ai.bridge"
+        private const val PATH_CONVERSATIONS =
+            "conversations"
     }
 }
