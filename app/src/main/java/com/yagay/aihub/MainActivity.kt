@@ -1,6 +1,6 @@
 package com.yagay.aihub
 
-import android.app.ActivityNotFoundException
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
