@@ -127,6 +127,7 @@ fun WorkspaceRoot(
     val scope = rememberCoroutineScope()
     var nativePickerTarget by remember { mutableStateOf<String?>(null) }
     var bindingActionWindowId by remember { mutableStateOf<String?>(null) }
+    var deleteActionWindowId by remember { mutableStateOf<String?>(null) }
 
     val nativeAttachmentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -248,7 +249,7 @@ fun WorkspaceRoot(
                         onClick = {
                             val id = bindingActionWindow.id
                             bindingActionWindowId = null
-                            vm.deleteChat(id, runtime)
+                            deleteActionWindowId = id
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -263,6 +264,54 @@ fun WorkspaceRoot(
                     ) {
                         Text("取消")
                     }
+                }
+            }
+        )
+    }
+
+    val deleteActionWindow = vm.windows.firstOrNull {
+        it.id == deleteActionWindowId
+    }
+    if (deleteActionWindow != null) {
+        val displayName =
+            deleteActionWindow.boundProject.orEmpty()
+                .ifBlank { deleteActionWindow.title }
+                .ifBlank { "聊天" }
+
+        AlertDialog(
+            onDismissRequest = {
+                deleteActionWindowId = null
+            },
+            title = {
+                Text("删除聊天")
+            },
+            text = {
+                Text(
+                    if (deleteActionWindow.boundUrl.isNullOrBlank()) {
+                        "确定删除“$displayName”吗？AIHub 中的这个聊天标签会被删除。"
+                    } else {
+                        "确定删除“$displayName”吗？项目绑定和 AIHub 中的这个聊天标签会一起删除。"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val id = deleteActionWindow.id
+                        deleteActionWindowId = null
+                        vm.deleteChat(id, runtime)
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        deleteActionWindowId = null
+                    }
+                ) {
+                    Text("取消")
                 }
             }
         )
