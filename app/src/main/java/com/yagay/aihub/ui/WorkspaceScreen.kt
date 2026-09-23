@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -14,6 +15,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AttachFile
@@ -201,44 +204,62 @@ fun WorkspaceRoot(
             text = {
                 Text(
                     if (bindingActionWindow.boundUrl.isNullOrBlank()) {
-                        "这个新聊天还没有绑定项目。"
+                        "这个聊天还没有绑定项目。可以绑定项目，或直接删除这个聊天。"
                     } else {
-                        "可以重新绑定到其他项目，或解除当前绑定。"
+                        "可以重新绑定、解除当前项目绑定，或删除这个聊天。"
                     }
                 )
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        val id = bindingActionWindow.id
-                        bindingActionWindowId = null
-                        vm.requestBinding(id)
-                    }
+                Column(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        if (bindingActionWindow.boundUrl.isNullOrBlank()) {
-                            "绑定项目"
-                        } else {
-                            "重新绑定"
-                        }
-                    )
-                }
-            },
-            dismissButton = {
-                Row {
+                    TextButton(
+                        onClick = {
+                            val id = bindingActionWindow.id
+                            bindingActionWindowId = null
+                            vm.requestBinding(id)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (bindingActionWindow.boundUrl.isNullOrBlank()) {
+                                "绑定项目"
+                            } else {
+                                "重新绑定"
+                            }
+                        )
+                    }
+
                     if (!bindingActionWindow.boundUrl.isNullOrBlank()) {
                         TextButton(
                             onClick = {
                                 val id = bindingActionWindow.id
                                 bindingActionWindowId = null
                                 vm.unbindWindow(id)
-                            }
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("解除绑定")
                         }
                     }
+
                     TextButton(
-                        onClick = { bindingActionWindowId = null }
+                        onClick = {
+                            val id = bindingActionWindow.id
+                            bindingActionWindowId = null
+                            vm.deleteChat(id, runtime)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("删除聊天")
+                    }
+
+                    TextButton(
+                        onClick = {
+                            bindingActionWindowId = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("取消")
                     }
@@ -303,19 +324,55 @@ fun WorkspaceRoot(
         }
     }
 
+    BackHandler(
+        enabled = drawerState.isOpen
+    ) {
+        scope.launch {
+            drawerState.close()
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = drawerState.isOpen,
         drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.50f)) {
-                Spacer(Modifier.height(16.dp))
+            ModalDrawerSheet(
+                modifier = Modifier
+                    .fillMaxWidth(0.50f)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Spacer(Modifier.height(12.dp))
 
-                Text(
-                    "AIHub",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = 20.dp,
+                            end = 8.dp,
+                            top = 4.dp,
+                            bottom = 4.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "AIHub",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                drawerState.close()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "关闭菜单",
+                        )
+                    }
+                }
 
                 Button(
                     onClick = {
@@ -353,34 +410,91 @@ fun WorkspaceRoot(
                     }
 
                     vm.windowsFor(provider.id).forEach { window ->
-                        NavigationDrawerItem(
-                            label = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        window.title,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    when {
-                                        window.generating -> Text(" ⟳")
-                                        window.unread -> Text(
+                        val selected =
+                            window.id == vm.activeWindowId
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color =
+                                if (selected) {
+                                    MaterialTheme.colorScheme
+                                        .secondaryContainer
+                                } else {
+                                    androidx.compose.ui.graphics.Color
+                                        .Transparent
+                                },
+                            modifier = Modifier
+                                .padding(
+                                    horizontal = 8.dp,
+                                    vertical = 2.dp,
+                                )
+                                .fillMaxWidth()
+                                .combinedClickable(
+                                    onClick = {
+                                        vm.switchWindow(window.id)
+                                        scope.launch {
+                                            drawerState.close()
+                                        }
+                                    },
+                                    onLongClick = {
+                                        bindingActionWindowId =
+                                            window.id
+                                        scope.launch {
+                                            drawerState.close()
+                                        }
+                                    },
+                                ),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = 16.dp,
+                                    vertical = 13.dp,
+                                ),
+                                verticalAlignment =
+                                    Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    window.boundProject.orEmpty()
+                                        .ifBlank {
+                                            window.title
+                                        },
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                when {
+                                    window.generating ->
+                                        Text(" ⟳")
+                                    window.unread ->
+                                        Text(
                                             " ●",
-                                            color = MaterialTheme.colorScheme.primary
+                                            color =
+                                                MaterialTheme
+                                                    .colorScheme
+                                                    .primary,
                                         )
-                                    }
                                 }
-                            },
-                            selected = window.id == vm.activeWindowId,
-                            onClick = {
-                                vm.switchWindow(window.id)
-                                scope.launch { drawerState.close() }
-                            },
-                            modifier = Modifier.padding(horizontal = 8.dp)
-                        )
+                            }
+                        }
                     }
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                NavigationDrawerItem(
+                    label = { Text("清空诊断日志") },
+                    selected = false,
+                    onClick = {
+                        DiagnosticLogger.clear()
+                        Toast.makeText(
+                            context,
+                            "诊断日志已清空，请复现一次问题后再导出",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        scope.launch {
+                            drawerState.close()
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
 
                 NavigationDrawerItem(
                     label = { Text("导出诊断日志") },
@@ -424,6 +538,21 @@ fun WorkspaceRoot(
                             }
                         },
                         actions = {
+                            IconButton(
+                                onClick = {
+                                    vm.refreshChat(
+                                        runtime,
+                                        vm.activeWindowId,
+                                    )
+                                },
+                                enabled = !vm.activeWindow.generating
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    "刷新聊天",
+                                )
+                            }
+
                             TextButton(
                                 onClick = {
                                     runtime.openWeb(
