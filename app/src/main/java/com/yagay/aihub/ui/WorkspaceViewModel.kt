@@ -771,9 +771,8 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         val target = windows.firstOrNull {
             it.id == windowId
         } ?: return
-        val provider = ProviderCatalog.byId(
-            target.providerId
-        )
+        val provider =
+            ProviderCatalog.byId(target.providerId)
 
         if (refreshJobs[windowId]?.isActive == true) {
             return
@@ -792,61 +791,73 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
                 )
 
                 try {
+                    // ensureSession is metadata-only for standalone AIHub.
+                    // The history request itself is handled by YBrowser's
+                    // shared ChatGPT Page API broker, so refresh no longer
+                    // reloads or creates this tab's live Gecko session.
                     runtime.ensureSession(target)
-                    runtime.resetProviderSession(
-                        windowId,
-                        provider,
-                    )
 
-                    repeat(40) {
-                        delay(250)
-
-                        val latest =
-                            conversationStore.load(
-                                session(target)
+                    val bridgeCount =
+                        runCatching {
+                            runtime.syncConversation(
+                                windowId,
+                                provider,
                             )
-
-                        if (latest != before) {
-                            if (windowId == activeWindowId) {
-                                messages.clear()
-                                messages.addAll(latest)
-                            } else if (latest.isNotEmpty()) {
-                                updateWindow(windowId) {
-                                    it.copy(unread = true)
-                                }
-                            }
-
-                            setStatus(windowId, null)
-                            DiagnosticLogger.i(
+                        }.onFailure {
+                            DiagnosticLogger.e(
                                 "WORKSPACE",
-                                "chat_refresh_updated provider=" +
+                                "chat_refresh_sync_failed provider=" +
                                     provider.id +
                                     " window=" +
-                                    windowId.take(12) +
-                                    " messages=" +
-                                    latest.size,
+                                    windowId.take(12),
+                                it,
                             )
-                            return@launch
+                        }.getOrDefault(0)
+
+                    val latest =
+                        conversationStore.load(
+                            session(target)
+                        )
+
+                    if (
+                        windowId == activeWindowId &&
+                        latest.isNotEmpty()
+                    ) {
+                        messages.clear()
+                        messages.addAll(latest)
+                    } else if (
+                        windowId != activeWindowId &&
+                        latest.isNotEmpty() &&
+                        latest != before
+                    ) {
+                        updateWindow(windowId) {
+                            it.copy(unread = true)
                         }
                     }
 
-                    refreshConversationFromBridge(
-                        windowId
+                    setStatus(
+                        windowId,
+                        when {
+                            latest.isNotEmpty() -> null
+                            before.isNotEmpty() -> null
+                            bridgeCount > 0 -> null
+                            else -> "暂未读取到聊天历史。"
+                        },
                     )
 
-                    if (
-                        statuses[windowId] ==
-                            "正在同步当前聊天历史…"
-                    ) {
-                        setStatus(
-                            windowId,
-                            if (before.isNotEmpty()) {
-                                "旧聊天已保留，后台仍在同步。"
-                            } else {
-                                "暂未读取到聊天历史，后台仍在同步。"
-                            },
-                        )
-                    }
+                    DiagnosticLogger.i(
+                        "WORKSPACE",
+                        "chat_refresh_complete provider=" +
+                            provider.id +
+                            " window=" +
+                            windowId.take(12) +
+                            " before=" +
+                            before.size +
+                            " bridgeCount=" +
+                            bridgeCount +
+                            " stored=" +
+                            latest.size,
+                    )
                 } finally {
                     refreshJobs.remove(windowId)
                 }
