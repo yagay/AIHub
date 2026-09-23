@@ -4,10 +4,13 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DrawerValue
@@ -99,13 +103,27 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WorkspaceRoot(runtime: WindowWebRuntime) {
+fun WorkspaceRoot(
+    runtime: WindowWebRuntime,
+    launchIntent: Intent? = null,
+    launchRevision: Int = 0,
+    resumeRevision: Int = 0,
+) {
     val context = LocalContext.current
     val application = context.applicationContext as Application
     val vm: WorkspaceViewModel = viewModel(factory = WorkspaceViewModel.Factory(application))
+    LaunchedEffect(launchRevision) {
+        vm.handleLaunchIntent(launchIntent)
+    }
+    LaunchedEffect(resumeRevision) {
+        if (resumeRevision > 1) {
+            vm.refreshConversationFromBridge(vm.activeWindowId)
+        }
+    }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var nativePickerTarget by remember { mutableStateOf<String?>(null) }
+    var bindingActionWindowId by remember { mutableStateOf<String?>(null) }
 
     val nativeAttachmentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -171,6 +189,64 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
         )
     }
 
+    val bindingActionWindow = vm.windows.firstOrNull {
+        it.id == bindingActionWindowId
+    }
+    if (bindingActionWindow != null) {
+        val projectName = bindingActionWindow.boundProject.orEmpty()
+            .ifBlank { bindingActionWindow.title }
+        AlertDialog(
+            onDismissRequest = { bindingActionWindowId = null },
+            title = { Text(projectName) },
+            text = {
+                Text(
+                    if (bindingActionWindow.boundUrl.isNullOrBlank()) {
+                        "这个新聊天还没有绑定项目。"
+                    } else {
+                        "可以重新绑定到其他项目，或解除当前绑定。"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val id = bindingActionWindow.id
+                        bindingActionWindowId = null
+                        vm.requestBinding(id)
+                    }
+                ) {
+                    Text(
+                        if (bindingActionWindow.boundUrl.isNullOrBlank()) {
+                            "绑定项目"
+                        } else {
+                            "重新绑定"
+                        }
+                    )
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (!bindingActionWindow.boundUrl.isNullOrBlank()) {
+                        TextButton(
+                            onClick = {
+                                val id = bindingActionWindow.id
+                                bindingActionWindowId = null
+                                vm.unbindWindow(id)
+                            }
+                        ) {
+                            Text("解除绑定")
+                        }
+                    }
+                    TextButton(
+                        onClick = { bindingActionWindowId = null }
+                    ) {
+                        Text("取消")
+                    }
+                }
+            }
+        )
+    }
+
     DisposableEffect(runtime) {
         runtime.setFileSelectionListener {
                 windowId,
@@ -229,6 +305,7 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.50f)) {
                 Spacer(Modifier.height(16.dp))
@@ -325,7 +402,8 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
                         title = {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    vm.activeWindow.title,
+                                    vm.activeWindow.boundProject.orEmpty()
+                                        .ifBlank { vm.activeWindow.title },
                                     maxLines = 1,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -368,12 +446,11 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
                     )
 
                     WindowTabStrip(
-                        windows = vm.windows,
+                        windows = vm.tabWindows,
                         activeWindowId = vm.activeWindowId,
+                        focusRevision = launchRevision,
                         onSelect = vm::switchWindow,
-                        onClose = { id ->
-                            vm.closeWindow(id, runtime)
-                        }
+                        onLongPress = { bindingActionWindowId = it },
                     )
                 }
             }
@@ -407,14 +484,30 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WindowTabStrip(
     windows: List<ChatWindow>,
     activeWindowId: String,
+    focusRevision: Int,
     onSelect: (String) -> Unit,
-    onClose: (String) -> Unit
+    onLongPress: (String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(
+        activeWindowId,
+        windows.map { it.id },
+        focusRevision,
+    ) {
+        val index = windows.indexOfFirst { it.id == activeWindowId }
+        if (index >= 0) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
     LazyRow(
+        state = listState,
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
@@ -423,6 +516,8 @@ private fun WindowTabStrip(
     ) {
         items(windows, key = { it.id }) { window ->
             val selected = window.id == activeWindowId
+            val label = window.boundProject.orEmpty()
+                .ifBlank { window.title }
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -434,13 +529,16 @@ private fun WindowTabStrip(
             ) {
                 Row(
                     modifier = Modifier
-                        .clickable { onSelect(window.id) }
-                        .padding(start = 12.dp, end = 2.dp),
+                        .combinedClickable(
+                            onClick = { onSelect(window.id) },
+                            onLongClick = { onLongPress(window.id) },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         buildString {
-                            append(window.title)
+                            append(label)
                             when {
                                 window.generating -> append(" ⟳")
                                 window.unread -> append(" ●")
@@ -449,19 +547,6 @@ private fun WindowTabStrip(
                         maxLines = 1,
                         modifier = Modifier.widthIn(max = 180.dp)
                     )
-
-                    IconButton(
-                        onClick = {
-                            onClose(window.id)
-                        },
-                        modifier = Modifier.size(34.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            "关闭窗口",
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
                 }
             }
         }
