@@ -155,6 +155,7 @@ class WindowWebRuntime(
             )
             putExtra(EXTRA_WINDOW_ID, window.id)
             putExtra(EXTRA_PROVIDER_ID, provider.id)
+            putExtra(EXTRA_WEB_ONLY, true)
             (window.url)
                 ?.takeIf { it.isNotBlank() }
                 ?.let {
@@ -579,6 +580,8 @@ class WindowWebRuntime(
             "com.yagay.YBrowser.extra.AI_WINDOW_ID"
         private const val EXTRA_PROVIDER_ID =
             "com.yagay.YBrowser.extra.AI_PROVIDER_ID"
+        private const val EXTRA_WEB_ONLY =
+            "com.yagay.YBrowser.extra.AI_WEB_ONLY"
         private const val EXTRA_URL =
             "com.yagay.YBrowser.extra.URL"
         private const val EXTRA_BOUND_URL =
