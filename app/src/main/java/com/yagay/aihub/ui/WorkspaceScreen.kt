@@ -186,10 +186,15 @@ fun WorkspaceRoot(
     androidx.compose.runtime.LaunchedEffect(
         vm.activeWindow.id,
         vm.activeWindow.url,
+        vm.activeWindow.boundUrl,
     ) {
         runtime.ensureSession(vm.activeWindow)
         vm.refreshConversationFromBridge(
             vm.activeWindow.id
+        )
+        vm.syncConversation(
+            runtime,
+            vm.activeWindow.id,
         )
     }
 
