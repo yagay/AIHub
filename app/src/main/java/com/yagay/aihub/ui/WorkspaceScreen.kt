@@ -877,14 +877,9 @@ private fun MessageBubble(
                         Modifier.fillMaxWidth(0.86f),
                 ) {
                     SelectionContainer {
-                        Text(
-                            message.text,
-                            style =
-                                MaterialTheme.typography
-                                    .bodyLarge
-                                    .copy(
-                                        lineHeight = 25.sp
-                                    ),
+                        ChatMarkdownContent(
+                            text = message.text,
+                            compact = true,
                             modifier =
                                 Modifier.padding(
                                     horizontal = 16.dp,
@@ -895,14 +890,9 @@ private fun MessageBubble(
                 }
             } else {
                 SelectionContainer {
-                    Text(
-                        message.text,
-                        style =
-                            MaterialTheme.typography
-                                .bodyLarge
-                                .copy(
-                                    lineHeight = 26.sp
-                                ),
+                    ChatMarkdownContent(
+                        text = message.text,
+                        compact = false,
                         modifier =
                             Modifier.fillMaxWidth(),
                     )
@@ -982,6 +972,507 @@ private fun MessageBubble(
         }
     }
 }
+
+private enum class ChatBlockType {
+    PARAGRAPH,
+    HEADING_1,
+    HEADING_2,
+    HEADING_3,
+    BULLET,
+    NUMBERED,
+    QUOTE,
+    CODE,
+}
+
+private data class ChatTextBlock(
+    val type: ChatBlockType,
+    val text: String,
+    val marker: String = "",
+)
+
+private fun parseChatTextBlocks(
+    raw: String,
+): List<ChatTextBlock> {
+    val codeMark = 96.toChar()
+    val fence =
+        codeMark.toString().repeat(3)
+    val lines =
+        raw.replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .lines()
+    val blocks =
+        mutableListOf<ChatTextBlock>()
+    var index = 0
+
+    fun isSpecial(
+        line: String,
+    ): Boolean {
+        val value = line.trimStart()
+        return value.startsWith(fence) ||
+            value.startsWith("# ") ||
+            value.startsWith("## ") ||
+            value.startsWith("### ") ||
+            value.startsWith("> ") ||
+            value.startsWith("- ") ||
+            value.startsWith("* ") ||
+            Regex("""^\d+\.\s+.+""")
+                .matches(value)
+    }
+
+    while (index < lines.size) {
+        val trimmed =
+            lines[index].trim()
+
+        if (trimmed.isBlank()) {
+            index += 1
+            continue
+        }
+
+        if (trimmed.startsWith(fence)) {
+            val language =
+                trimmed.removePrefix(fence)
+                    .trim()
+            index += 1
+            val code =
+                mutableListOf<String>()
+            while (
+                index < lines.size &&
+                !lines[index]
+                    .trim()
+                    .startsWith(fence)
+            ) {
+                code += lines[index]
+                index += 1
+            }
+            if (index < lines.size) {
+                index += 1
+            }
+            blocks += ChatTextBlock(
+                type = ChatBlockType.CODE,
+                text = code.joinToString("\n"),
+                marker = language,
+            )
+            continue
+        }
+
+        when {
+            trimmed.startsWith("### ") -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.HEADING_3,
+                    trimmed.removePrefix("### "),
+                )
+                index += 1
+            }
+
+            trimmed.startsWith("## ") -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.HEADING_2,
+                    trimmed.removePrefix("## "),
+                )
+                index += 1
+            }
+
+            trimmed.startsWith("# ") -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.HEADING_1,
+                    trimmed.removePrefix("# "),
+                )
+                index += 1
+            }
+
+            trimmed.startsWith("> ") -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.QUOTE,
+                    trimmed.removePrefix("> "),
+                )
+                index += 1
+            }
+
+            trimmed.startsWith("- ") ||
+                trimmed.startsWith("* ") -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.BULLET,
+                    trimmed.drop(2),
+                    marker = "•",
+                )
+                index += 1
+            }
+
+            Regex("""^\d+\.\s+.+""")
+                .matches(trimmed) -> {
+                blocks += ChatTextBlock(
+                    ChatBlockType.NUMBERED,
+                    trimmed
+                        .substringAfter(".")
+                        .trim(),
+                    marker =
+                        trimmed
+                            .substringBefore(".") +
+                            ".",
+                )
+                index += 1
+            }
+
+            else -> {
+                val paragraph =
+                    mutableListOf<String>()
+                while (
+                    index < lines.size &&
+                    lines[index].isNotBlank() &&
+                    !isSpecial(lines[index])
+                ) {
+                    paragraph +=
+                        lines[index].trim()
+                    index += 1
+                }
+                if (paragraph.isNotEmpty()) {
+                    blocks += ChatTextBlock(
+                        ChatBlockType.PARAGRAPH,
+                        paragraph.joinToString(
+                            "\n"
+                        ),
+                    )
+                } else {
+                    index += 1
+                }
+            }
+        }
+    }
+
+    return blocks
+}
+
+@Composable
+private fun ChatMarkdownContent(
+    text: String,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = remember(text) {
+        parseChatTextBlocks(text)
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement =
+            Arrangement.spacedBy(
+                if (compact) 6.dp else 10.dp
+            ),
+    ) {
+        blocks.forEach { block ->
+            when (block.type) {
+                ChatBlockType.HEADING_1,
+                ChatBlockType.HEADING_2,
+                ChatBlockType.HEADING_3 -> {
+                    val style =
+                        when (block.type) {
+                            ChatBlockType.HEADING_1 ->
+                                MaterialTheme
+                                    .typography
+                                    .headlineSmall
+                            ChatBlockType.HEADING_2 ->
+                                MaterialTheme
+                                    .typography
+                                    .titleLarge
+                            else ->
+                                MaterialTheme
+                                    .typography
+                                    .titleMedium
+                        }
+
+                    ChatInlineMarkdown(
+                        text = block.text,
+                        style = style,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+                }
+
+                ChatBlockType.CODE -> {
+                    Surface(
+                        shape =
+                            RoundedCornerShape(
+                                12.dp
+                            ),
+                        color =
+                            MaterialTheme.colorScheme
+                                .surfaceContainerHighest,
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier =
+                                Modifier.padding(
+                                    horizontal = 13.dp,
+                                    vertical = 11.dp,
+                                ),
+                        ) {
+                            if (
+                                block.marker
+                                    .isNotBlank()
+                            ) {
+                                Text(
+                                    block.marker,
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .labelSmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                    modifier =
+                                        Modifier.padding(
+                                            bottom = 7.dp,
+                                        ),
+                                )
+                            }
+
+                            Text(
+                                block.text,
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodyMedium
+                                        .copy(
+                                            fontFamily =
+                                                FontFamily
+                                                    .Monospace,
+                                            lineHeight =
+                                                20.sp,
+                                        ),
+                                modifier =
+                                    Modifier
+                                        .horizontalScroll(
+                                            rememberScrollState()
+                                        ),
+                            )
+                        }
+                    }
+                }
+
+                ChatBlockType.BULLET,
+                ChatBlockType.NUMBERED -> {
+                    Row(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        verticalAlignment =
+                            Alignment.Top,
+                    ) {
+                        Text(
+                            block.marker,
+                            style =
+                                MaterialTheme.typography
+                                    .bodyLarge
+                                    .copy(
+                                        lineHeight =
+                                            26.sp
+                                    ),
+                            modifier =
+                                Modifier.width(28.dp),
+                        )
+                        ChatInlineMarkdown(
+                            text = block.text,
+                            style =
+                                MaterialTheme.typography
+                                    .bodyLarge
+                                    .copy(
+                                        lineHeight =
+                                            26.sp
+                                    ),
+                            modifier =
+                                Modifier.weight(1f),
+                        )
+                    }
+                }
+
+                ChatBlockType.QUOTE -> {
+                    Row(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                    ) {
+                        Surface(
+                            color =
+                                MaterialTheme.colorScheme
+                                    .outlineVariant,
+                            modifier = Modifier
+                                .width(3.dp)
+                                .height(26.dp),
+                        ) {}
+                        ChatInlineMarkdown(
+                            text = block.text,
+                            style =
+                                MaterialTheme.typography
+                                    .bodyLarge
+                                    .copy(
+                                        lineHeight =
+                                            26.sp
+                                    ),
+                            color =
+                                MaterialTheme.colorScheme
+                                    .onSurfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp),
+                        )
+                    }
+                }
+
+                ChatBlockType.PARAGRAPH -> {
+                    ChatInlineMarkdown(
+                        text = block.text,
+                        style =
+                            MaterialTheme.typography
+                                .bodyLarge
+                                .copy(
+                                    lineHeight =
+                                        if (compact) {
+                                            25.sp
+                                        } else {
+                                            26.sp
+                                        },
+                                ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatInlineMarkdown(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color:
+        androidx.compose.ui.graphics.Color =
+        MaterialTheme.colorScheme.onSurface,
+    fontWeight: FontWeight? = null,
+) {
+    val background =
+        MaterialTheme.colorScheme
+            .surfaceContainerHighest
+
+    Text(
+        text = remember(
+            text,
+            background,
+        ) {
+            buildInlineMarkdown(
+                text,
+                background,
+            )
+        },
+        style = style,
+        color = color,
+        fontWeight = fontWeight,
+        modifier = modifier,
+    )
+}
+
+private fun buildInlineMarkdown(
+    text: String,
+    codeBackground:
+        androidx.compose.ui.graphics.Color,
+): AnnotatedString =
+    buildAnnotatedString {
+        val codeMark = 96.toChar()
+        var cursor = 0
+
+        while (cursor < text.length) {
+            when {
+                text.startsWith(
+                    "**",
+                    cursor,
+                ) -> {
+                    val end =
+                        text.indexOf(
+                            "**",
+                            cursor + 2,
+                        )
+                    if (end > cursor + 2) {
+                        withStyle(
+                            SpanStyle(
+                                fontWeight =
+                                    FontWeight
+                                        .SemiBold,
+                            )
+                        ) {
+                            append(
+                                text.substring(
+                                    cursor + 2,
+                                    end,
+                                )
+                            )
+                        }
+                        cursor = end + 2
+                    } else {
+                        append(text[cursor])
+                        cursor += 1
+                    }
+                }
+
+                text[cursor] == codeMark -> {
+                    val end =
+                        text.indexOf(
+                            codeMark,
+                            cursor + 1,
+                        )
+                    if (end > cursor + 1) {
+                        withStyle(
+                            SpanStyle(
+                                fontFamily =
+                                    FontFamily
+                                        .Monospace,
+                                background =
+                                    codeBackground,
+                            )
+                        ) {
+                            append(
+                                text.substring(
+                                    cursor + 1,
+                                    end,
+                                )
+                            )
+                        }
+                        cursor = end + 1
+                    } else {
+                        append(text[cursor])
+                        cursor += 1
+                    }
+                }
+
+                else -> {
+                    val nextBold =
+                        text.indexOf(
+                            "**",
+                            cursor,
+                        ).takeIf {
+                            it >= 0
+                        } ?: text.length
+                    val nextCode =
+                        text.indexOf(
+                            codeMark,
+                            cursor,
+                        ).takeIf {
+                            it >= 0
+                        } ?: text.length
+                    val next =
+                        minOf(
+                            nextBold,
+                            nextCode,
+                        )
+                    append(
+                        text.substring(
+                            cursor,
+                            next,
+                        )
+                    )
+                    cursor = next
+                }
+            }
+        }
+    }
 
 private fun formatFileSize(
     bytes: Long,
