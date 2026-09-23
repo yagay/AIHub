@@ -1,9 +1,7 @@
 package com.yagay.aihub.ui
 
 import android.app.Application
-import android.widget.FrameLayout
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -67,7 +65,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yagay.aihub.diagnostics.DiagnosticLogger
@@ -91,12 +88,6 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var nativePickerTarget by remember { mutableStateOf<String?>(null) }
-
-    val webFileChooser = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        runtime.handleFileChooserResult(result.resultCode, result.data)
-    }
 
     val nativeAttachmentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -122,12 +113,13 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
                     if (result == null || result.attachedCount <= 0) {
                         Toast.makeText(
                             context,
-                            "${provider.name} 没有接收文件，已切到网页视图。",
+                            "${provider.name} 没有接收文件，请在 YBrowser 网页检查。",
                             Toast.LENGTH_LONG
                         ).show()
-                        if (vm.activeWindowId == windowId) {
-                            vm.setViewMode(WindowViewMode.WEB)
-                        }
+                        runtime.openWeb(
+                            window,
+                            provider,
+                        )
                     }
                 }
             }
@@ -151,35 +143,76 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
         }
     }
 
+    androidx.compose.runtime.LaunchedEffect(
+        vm.activeWindow.id,
+        vm.activeWindow.url,
+    ) {
+        runtime.ensureSession(vm.activeWindow)
+        vm.refreshConversationFromBridge(
+            vm.activeWindow.id
+        )
+    }
+
     DisposableEffect(runtime) {
-        runtime.setFileChooserLauncher { intent ->
-            webFileChooser.launch(intent)
+        runtime.setFileSelectionListener {
+                windowId,
+                _,
+                attachments,
+            ->
+            vm.onAttachments(
+                windowId,
+                attachments,
+            )
         }
-        runtime.setFileSelectionListener { windowId, _, attachments ->
-            vm.onAttachments(windowId, attachments)
+        runtime.setPageChangeListener {
+                windowId,
+                provider,
+                url,
+            ->
+            vm.onPageChanged(
+                windowId,
+                provider,
+                url,
+            )
         }
-        runtime.setPageChangeListener { windowId, provider, url ->
-            vm.onPageChanged(windowId, provider, url)
+        runtime.setHistoryChangeListener { windowId ->
+            val window =
+                vm.windows.firstOrNull {
+                    it.id == windowId
+                }
+            if (window != null) {
+                val provider =
+                    ProviderCatalog.byId(
+                        window.providerId
+                    )
+                runtime.currentUrl(
+                    windowId,
+                    provider,
+                )?.let { url ->
+                    vm.onPageChanged(
+                        windowId,
+                        provider,
+                        url,
+                    )
+                }
+            }
+            vm.refreshConversationFromBridge(
+                windowId
+            )
         }
 
         onDispose {
-            runtime.setFileChooserLauncher(null)
             runtime.setFileSelectionListener(null)
             runtime.setPageChangeListener(null)
+            runtime.setHistoryChangeListener(null)
             runtime.destroy()
-        }
-    }
-
-    BackHandler(enabled = vm.activeWindow.viewMode == WindowViewMode.WEB) {
-        if (!runtime.goBack(vm.activeWindow.id, vm.activeProvider)) {
-            vm.setViewMode(WindowViewMode.CHAT)
         }
     }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.88f)) {
+            ModalDrawerSheet(modifier = Modifier.fillMaxWidth(0.50f)) {
                 Spacer(Modifier.height(16.dp))
 
                 Text(
@@ -297,22 +330,13 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
                         actions = {
                             TextButton(
                                 onClick = {
-                                    vm.setViewMode(
-                                        if (vm.activeWindow.viewMode == WindowViewMode.CHAT) {
-                                            WindowViewMode.WEB
-                                        } else {
-                                            WindowViewMode.CHAT
-                                        }
+                                    runtime.openWeb(
+                                        vm.activeWindow,
+                                        vm.activeProvider,
                                     )
                                 }
                             ) {
-                                Text(
-                                    if (vm.activeWindow.viewMode == WindowViewMode.CHAT) {
-                                        "网页"
-                                    } else {
-                                        "聊天"
-                                    }
-                                )
+                                Text("网页")
                             }
 
                             IconButton(
@@ -358,13 +382,7 @@ fun WorkspaceRoot(runtime: WindowWebRuntime) {
                     onStop = {
                         vm.stop(runtime)
                     },
-                    visible = vm.activeWindow.viewMode == WindowViewMode.CHAT
-                )
-
-                WorkspaceWebHost(
-                    runtime = runtime,
-                    window = vm.activeWindow,
-                    visible = vm.activeWindow.viewMode == WindowViewMode.WEB
+                    visible = true
                 )
             }
         }
@@ -645,50 +663,5 @@ private fun MessageBubble(message: ChatMessage) {
                 )
             )
         }
-    }
-}
-
-@Composable
-private fun WorkspaceWebHost(
-    runtime: WindowWebRuntime,
-    window: ChatWindow,
-    visible: Boolean
-) {
-    val provider = ProviderCatalog.byId(window.providerId)
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .alpha(if (visible) 1f else 0f)
-            .zIndex(if (visible) 2f else -1f)
-            .then(
-                if (visible) {
-                    Modifier.background(
-                        MaterialTheme.colorScheme.background
-                    )
-                } else {
-                    Modifier
-                }
-            )
-    ) {
-        AndroidView(
-            factory = { context ->
-                FrameLayout(context).also { host ->
-                    runtime.attach(
-                        host,
-                        window,
-                        provider
-                    )
-                }
-            },
-            update = { host ->
-                runtime.attach(
-                    host,
-                    window,
-                    provider
-                )
-            },
-            modifier = Modifier.fillMaxSize()
-        )
     }
 }
