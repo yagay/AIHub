@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import com.yagay.aihub.diagnostics.DiagnosticLogger
 import com.yagay.aihub.ui.WorkspaceRoot
 import com.yagay.aihub.ui.theme.AIHubTheme
@@ -11,16 +14,35 @@ import com.yagay.aihub.web.WindowWebRuntime
 
 class MainActivity : ComponentActivity() {
     private val webRuntime by lazy { WindowWebRuntime(this) }
+    private var launchRevision by mutableIntStateOf(0)
+    private var resumeRevision by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DiagnosticLogger.i("ACTIVITY", "MainActivity.onCreate restored=${savedInstanceState != null}")
         enableEdgeToEdge()
+        launchRevision++
         setContent {
             AIHubTheme {
-                WorkspaceRoot(runtime = webRuntime)
+                WorkspaceRoot(
+                    runtime = webRuntime,
+                    launchIntent = intent,
+                    launchRevision = launchRevision,
+                    resumeRevision = resumeRevision,
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launchRevision++
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumeRevision++
     }
 
     override fun onPause() {
