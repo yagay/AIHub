@@ -479,13 +479,39 @@ private fun NativeChatPane(
     onAttach: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    visible: Boolean
+    visible: Boolean,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var followBottom by remember { mutableStateOf(true) }
+    val atBottom by remember {
+        derivedStateOf { !listState.canScrollForward }
+    }
 
-    androidx.compose.runtime.LaunchedEffect(messages.size, visible) {
-        if (visible && messages.isNotEmpty()) {
-            listState.scrollToItem(messages.lastIndex)
+    LaunchedEffect(
+        atBottom,
+        listState.isScrollInProgress,
+    ) {
+        when {
+            atBottom -> followBottom = true
+            listState.isScrollInProgress ->
+                followBottom = false
+        }
+    }
+
+    LaunchedEffect(
+        messages.size,
+        generating,
+        visible,
+    ) {
+        if (
+            visible &&
+            followBottom &&
+            messages.isNotEmpty()
+        ) {
+            listState.animateScrollToItem(
+                messages.lastIndex
+            )
         }
     }
 
@@ -496,108 +522,264 @@ private fun NativeChatPane(
             .zIndex(if (visible) 1f else -1f)
             .imePadding()
     ) {
-        LazyColumn(
-            state = listState,
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentPadding = PaddingValues(
-                horizontal = 16.dp,
-                vertical = 18.dp
-            ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (messages.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 64.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    top = 20.dp,
+                    bottom = 24.dp,
+                ),
+                verticalArrangement =
+                    Arrangement.spacedBy(20.dp),
+            ) {
+                if (messages.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    top = 72.dp,
+                                    start = 24.dp,
+                                    end = 24.dp,
+                                ),
+                            horizontalAlignment =
+                                Alignment.CenterHorizontally,
                         ) {
-                            Box(
-                                Modifier.size(68.dp),
-                                contentAlignment = Alignment.Center
+                            Surface(
+                                shape = CircleShape,
+                                color =
+                                    MaterialTheme.colorScheme
+                                        .primaryContainer,
                             ) {
-                                Text(
-                                    "AI",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Box(
+                                    Modifier.size(64.dp),
+                                    contentAlignment =
+                                        Alignment.Center,
+                                ) {
+                                    Text(
+                                        "AI",
+                                        style =
+                                            MaterialTheme.typography
+                                                .headlineMedium,
+                                        fontWeight =
+                                            FontWeight.SemiBold,
+                                    )
+                                }
                             }
+
+                            Spacer(Modifier.height(18.dp))
+
+                            Text(
+                                "开始聊天",
+                                style =
+                                    MaterialTheme.typography
+                                        .headlineSmall,
+                            )
+
+                            Text(
+                                "聊天内容由 YBrowser 同步，项目切换不会重新加载网页。",
+                                style =
+                                    MaterialTheme.typography
+                                        .bodyMedium,
+                                color =
+                                    MaterialTheme.colorScheme
+                                        .onSurfaceVariant,
+                                modifier = Modifier
+                                    .widthIn(max = 560.dp)
+                                    .padding(top = 8.dp),
+                            )
                         }
+                    }
+                }
 
-                        Spacer(Modifier.height(16.dp))
+                items(
+                    messages,
+                    key = { it.id },
+                ) { message ->
+                    MessageBubble(message)
+                }
 
-                        Text(
-                            "新聊天窗口",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-
-                        Text(
-                            "每个窗口保持自己的网页与聊天状态，切换窗口不会重新加载。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp)
-                        )
+                if (status != null) {
+                    item {
+                        Box(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            contentAlignment =
+                                Alignment.Center,
+                        ) {
+                            Text(
+                                status,
+                                style =
+                                    MaterialTheme.typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme.colorScheme
+                                        .onSurfaceVariant,
+                                modifier = Modifier
+                                    .widthIn(max = 760.dp)
+                                    .fillMaxWidth()
+                                    .padding(
+                                        horizontal = 18.dp,
+                                    ),
+                            )
+                        }
                     }
                 }
             }
 
-            items(messages, key = { it.id }) { message ->
-                MessageBubble(message)
-            }
-
-            if (status != null) {
-                item {
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+            if (
+                !followBottom &&
+                listState.canScrollForward
+            ) {
+                FilledIconButton(
+                    onClick = {
+                        followBottom = true
+                        scope.launch {
+                            if (messages.isNotEmpty()) {
+                                listState.animateScrollToItem(
+                                    messages.lastIndex
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                        .size(42.dp),
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription =
+                            "回到最新消息",
                     )
                 }
             }
         }
 
+        ChatComposer(
+            draft = draft,
+            onDraftChange = onDraftChange,
+            generating = generating,
+            attachments = attachments,
+            onAttach = onAttach,
+            onSend = {
+                followBottom = true
+                onSend()
+            },
+            onStop = onStop,
+        )
+    }
+}
+
+@Composable
+private fun ChatComposer(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    generating: Boolean,
+    attachments: List<AttachmentMeta>,
+    onAttach: () -> Unit,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = 12.dp,
+                vertical = 8.dp,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
         Surface(
-            tonalElevation = 3.dp,
-            shadowElevation = 6.dp,
-            shape = RoundedCornerShape(
-                topStart = 24.dp,
-                topEnd = 24.dp
-            )
+            tonalElevation = 1.dp,
+            shadowElevation = 2.dp,
+            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth(),
         ) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(10.dp)
+                    .padding(
+                        horizontal = 10.dp,
+                        vertical = 8.dp,
+                    )
             ) {
                 if (attachments.isNotEmpty()) {
-                    Text(
-                        "📎 " + attachments
-                            .joinToString(", ") { it.name }
-                            .take(120),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(
-                            horizontal = 8.dp,
-                            vertical = 4.dp
-                        )
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(
+                                rememberScrollState()
+                            ),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp),
+                    ) {
+                        attachments.forEach { attachment ->
+                            Surface(
+                                shape =
+                                    RoundedCornerShape(
+                                        12.dp
+                                    ),
+                                color =
+                                    MaterialTheme.colorScheme
+                                        .surfaceContainerHigh,
+                            ) {
+                                Column(
+                                    modifier =
+                                        Modifier.padding(
+                                            horizontal = 10.dp,
+                                            vertical = 7.dp,
+                                        ),
+                                ) {
+                                    Text(
+                                        attachment.name,
+                                        style =
+                                            MaterialTheme.typography
+                                                .labelMedium,
+                                        maxLines = 1,
+                                    )
+                                    if (
+                                        attachment.sizeBytes > 0
+                                    ) {
+                                        Text(
+                                            formatFileSize(
+                                                attachment
+                                                    .sizeBytes
+                                            ),
+                                            style =
+                                                MaterialTheme.typography
+                                                    .labelSmall,
+                                            color =
+                                                MaterialTheme.colorScheme
+                                                    .onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
                 }
 
-                Row(verticalAlignment = Alignment.Bottom) {
+                Row(
+                    verticalAlignment =
+                        Alignment.Bottom,
+                ) {
                     IconButton(
                         onClick = onAttach,
-                        enabled = !generating
+                        enabled = !generating,
                     ) {
                         Icon(
                             Icons.Outlined.AttachFile,
-                            "添加附件"
+                            "添加附件",
                         )
                     }
 
@@ -606,31 +788,41 @@ private fun NativeChatPane(
                         onValueChange = onDraftChange,
                         modifier = Modifier.weight(1f),
                         placeholder = {
-                            Text("发送消息…")
+                            Text("询问任何问题")
                         },
                         minLines = 1,
-                        maxLines = 6,
-                        shape = RoundedCornerShape(22.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor =
-                                androidx.compose.ui.graphics.Color.Transparent,
-                            unfocusedIndicatorColor =
-                                androidx.compose.ui.graphics.Color.Transparent
-                        )
+                        maxLines = 7,
+                        shape = RoundedCornerShape(24.dp),
+                        colors =
+                            TextFieldDefaults.colors(
+                                focusedIndicatorColor =
+                                    androidx.compose.ui
+                                        .graphics.Color
+                                        .Transparent,
+                                unfocusedIndicatorColor =
+                                    androidx.compose.ui
+                                        .graphics.Color
+                                        .Transparent,
+                                disabledIndicatorColor =
+                                    androidx.compose.ui
+                                        .graphics.Color
+                                        .Transparent,
+                            ),
                     )
 
-                    Spacer(Modifier.size(8.dp))
+                    Spacer(Modifier.size(6.dp))
 
                     FilledIconButton(
-                        onClick = if (generating) {
-                            onStop
-                        } else {
-                            onSend
-                        },
+                        onClick =
+                            if (generating) {
+                                onStop
+                            } else {
+                                onSend
+                            },
                         enabled =
                             generating ||
                                 draft.isNotBlank() ||
-                                attachments.isNotEmpty()
+                                attachments.isNotEmpty(),
                     ) {
                         Icon(
                             if (generating) {
@@ -638,7 +830,11 @@ private fun NativeChatPane(
                             } else {
                                 Icons.Default.Send
                             },
-                            if (generating) "停止" else "发送"
+                            if (generating) {
+                                "停止"
+                            } else {
+                                "发送"
+                            },
                         )
                     }
                 }
@@ -648,38 +844,158 @@ private fun NativeChatPane(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
-    val mine = message.role == MessageRole.USER
+private fun MessageBubble(
+    message: ChatMessage,
+) {
+    val mine =
+        message.role == MessageRole.USER
+    val context = LocalContext.current
 
-    Row(
+    Box(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            if (mine) Arrangement.End else Arrangement.Start
+        contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (mine) 20.dp else 6.dp,
-                bottomEnd = if (mine) 6.dp else 20.dp
-            ),
-            color = if (mine) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
-            modifier = Modifier.fillMaxWidth(
-                if (mine) 0.88f else 0.95f
-            )
+        Column(
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp),
+            horizontalAlignment =
+                if (mine) {
+                    Alignment.End
+                } else {
+                    Alignment.Start
+                },
         ) {
-            Text(
-                message.text,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(
-                    horizontal = 16.dp,
-                    vertical = 13.dp
-                )
-            )
+            if (mine) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color =
+                        MaterialTheme.colorScheme
+                            .surfaceContainerHigh,
+                    modifier =
+                        Modifier.fillMaxWidth(0.86f),
+                ) {
+                    SelectionContainer {
+                        Text(
+                            message.text,
+                            style =
+                                MaterialTheme.typography
+                                    .bodyLarge
+                                    .copy(
+                                        lineHeight = 25.sp
+                                    ),
+                            modifier =
+                                Modifier.padding(
+                                    horizontal = 16.dp,
+                                    vertical = 11.dp,
+                                ),
+                        )
+                    }
+                }
+            } else {
+                SelectionContainer {
+                    Text(
+                        message.text,
+                        style =
+                            MaterialTheme.typography
+                                .bodyLarge
+                                .copy(
+                                    lineHeight = 26.sp
+                                ),
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            if (message.attachments.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(
+                            rememberScrollState()
+                        ),
+                    horizontalArrangement =
+                        if (mine) {
+                            Arrangement.End
+                        } else {
+                            Arrangement.Start
+                        },
+                ) {
+                    message.attachments.forEach {
+                        attachment ->
+                        Surface(
+                            shape =
+                                RoundedCornerShape(10.dp),
+                            color =
+                                MaterialTheme.colorScheme
+                                    .surfaceContainer,
+                            modifier =
+                                Modifier.padding(
+                                    end = 8.dp
+                                ),
+                        ) {
+                            Text(
+                                "📎 " + attachment.name,
+                                style =
+                                    MaterialTheme.typography
+                                        .labelMedium,
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal = 10.dp,
+                                        vertical = 7.dp,
+                                    ),
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (!mine) {
+                IconButton(
+                    onClick = {
+                        val clipboard =
+                            context.getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                            ) as ClipboardManager
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText(
+                                "AI reply",
+                                message.text,
+                            )
+                        )
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "复制",
+                        modifier = Modifier.size(17.dp),
+                        tint =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
+}
+
+private fun formatFileSize(
+    bytes: Long,
+): String = when {
+    bytes >= 1024L * 1024L ->
+        String.format(
+            "%.1f MB",
+            bytes.toDouble() /
+                (1024.0 * 1024.0),
+        )
+    bytes >= 1024L ->
+        String.format(
+            "%.1f KB",
+            bytes.toDouble() / 1024.0,
+        )
+    else -> bytes.toString() + " B"
 }
