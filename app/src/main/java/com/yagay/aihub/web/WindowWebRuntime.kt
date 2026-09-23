@@ -311,6 +311,25 @@ class WindowWebRuntime(
             ) == true
         }
 
+    suspend fun syncConversation(
+        windowId: String,
+        provider: ProviderSpec,
+    ): Int =
+        withContext(Dispatchers.IO) {
+            val result =
+                call(
+                    METHOD_SYNC_CONVERSATION,
+                    bundleFor(
+                        windowId,
+                        provider,
+                    ),
+                )
+            result?.getInt(
+                RESULT_MESSAGE_COUNT,
+                0,
+            ) ?: 0
+        }
+
     suspend fun responseSnapshot(
         windowId: String,
         provider: ProviderSpec,
@@ -595,6 +614,8 @@ class WindowWebRuntime(
         private const val METHOD_CURRENT_URL =
             "current_url"
         private const val METHOD_RELOAD = "reload"
+        private const val METHOD_SYNC_CONVERSATION =
+            "sync_conversation"
         private const val METHOD_MARK_ATTACHMENTS_SUBMITTED =
             "mark_attachments_submitted"
 
@@ -618,5 +639,7 @@ class WindowWebRuntime(
         private const val RESULT_REASON = "reason"
         private const val RESULT_PATH = "path"
         private const val RESULT_QUIET_MS = "quiet_ms"
+        private const val RESULT_MESSAGE_COUNT =
+            "message_count"
     }
 }
