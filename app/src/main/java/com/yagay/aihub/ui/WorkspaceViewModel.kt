@@ -50,6 +50,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     private val pendingAttachments = mutableStateMapOf<String, List<AttachmentMeta>>()
     private val drafts = mutableStateMapOf<String, String>()
     private val generationJobs = mutableMapOf<String, Job>()
+    private val refreshJobs = mutableMapOf<String, Job>()
 
     init {
         val restored = windowStore.load()
@@ -397,6 +398,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     fun closeWindow(id: String, runtime: WindowWebRuntime) {
         val target = windows.firstOrNull { it.id == id } ?: return
         generationJobs.remove(id)?.cancel()
+        refreshJobs.remove(id)?.cancel()
         runtime.destroyWindow(id, ProviderCatalog.byId(target.providerId))
         conversationStore.clear(session(target))
         pendingAttachmentStore.clear(session(target))
@@ -420,6 +422,28 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         DiagnosticLogger.i(
             "WORKSPACE",
             "window_closed id=${id.take(12)} remaining=${windows.size}"
+        )
+    }
+
+    fun deleteChat(
+        windowId: String,
+        runtime: WindowWebRuntime,
+    ) {
+        val target = windows.firstOrNull {
+            it.id == windowId
+        } ?: return
+
+        if (!target.boundUrl.isNullOrBlank()) {
+            unbindWindow(windowId)
+        }
+
+        closeWindow(windowId, runtime)
+
+        DiagnosticLogger.i(
+            "WORKSPACE",
+            "chat_deleted id=" + windowId.take(12) +
+                " bound=" +
+                (!target.boundUrl.isNullOrBlank())
         )
     }
 
@@ -639,6 +663,95 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun refreshChat(
+        runtime: WindowWebRuntime,
+        windowId: String = activeWindowId,
+    ) {
+        val target = windows.firstOrNull {
+            it.id == windowId
+        } ?: return
+        val provider = ProviderCatalog.byId(
+            target.providerId
+        )
+
+        if (refreshJobs[windowId]?.isActive == true) {
+            return
+        }
+
+        val before =
+            conversationStore.load(
+                session(target)
+            )
+
+        refreshJobs[windowId] =
+            viewModelScope.launch {
+                setStatus(
+                    windowId,
+                    "正在同步当前聊天历史…",
+                )
+
+                try {
+                    runtime.ensureSession(target)
+                    runtime.resetProviderSession(
+                        windowId,
+                        provider,
+                    )
+
+                    repeat(40) {
+                        delay(250)
+
+                        val latest =
+                            conversationStore.load(
+                                session(target)
+                            )
+
+                        if (latest != before) {
+                            if (windowId == activeWindowId) {
+                                messages.clear()
+                                messages.addAll(latest)
+                            } else if (latest.isNotEmpty()) {
+                                updateWindow(windowId) {
+                                    it.copy(unread = true)
+                                }
+                            }
+
+                            setStatus(windowId, null)
+                            DiagnosticLogger.i(
+                                "WORKSPACE",
+                                "chat_refresh_updated provider=" +
+                                    provider.id +
+                                    " window=" +
+                                    windowId.take(12) +
+                                    " messages=" +
+                                    latest.size,
+                            )
+                            return@launch
+                        }
+                    }
+
+                    refreshConversationFromBridge(
+                        windowId
+                    )
+
+                    if (
+                        statuses[windowId] ==
+                            "正在同步当前聊天历史…"
+                    ) {
+                        setStatus(
+                            windowId,
+                            if (before.isNotEmpty()) {
+                                "旧聊天已保留，后台仍在同步。"
+                            } else {
+                                "暂未读取到聊天历史，后台仍在同步。"
+                            },
+                        )
+                    }
+                } finally {
+                    refreshJobs.remove(windowId)
+                }
+            }
+    }
+
     fun refreshConversationFromBridge(
         windowId: String,
     ) {
@@ -657,6 +770,13 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
             updateWindow(windowId) {
                 it.copy(unread = true)
             }
+        }
+
+        if (
+            statuses[windowId] ==
+                "正在同步当前聊天历史…"
+        ) {
+            setStatus(windowId, null)
         }
     }
 
