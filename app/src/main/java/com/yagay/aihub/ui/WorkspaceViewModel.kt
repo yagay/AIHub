@@ -206,6 +206,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
             setGenerating(target.id, true)
             setStatus(target.id, "正在连接 ${provider.name}…")
             try {
+                runtime.ensureSession(target)
                 val baseline = runCatching {
                     runtime.responseSnapshot(target.id, provider)
                 }.getOrDefault(WebRuntime.ResponseSnapshot())
@@ -221,8 +222,10 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
                 }.getOrDefault(false)
 
                 if (!sent) {
-                    setStatus(target.id, "消息没有被官网确认提交，请切到网页视图检查。")
-                    setViewModeFor(target.id, WindowViewMode.WEB)
+                    setStatus(
+                        target.id,
+                        "消息没有被官网确认提交，请在 YBrowser 网页检查。",
+                    )
                     return@launch
                 }
 
@@ -288,8 +291,10 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
             val fresh = snap.text.isNotBlank() && (structuralChange || textChange || sawGenerating)
 
             if (snap.state == "error") {
-                setStatus(windowId, "官网没有完成消息提交，请切到网页视图检查。")
-                setViewModeFor(windowId, WindowViewMode.WEB)
+                setStatus(
+                    windowId,
+                    "官网没有完成消息提交，请在 YBrowser 网页检查。",
+                )
                 return
             }
 
@@ -351,6 +356,27 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
             updateWindow(windowId) { it.copy(unread = false) }
         } else {
             updateWindow(windowId) { it.copy(unread = true) }
+        }
+    }
+
+    fun refreshConversationFromBridge(
+        windowId: String,
+    ) {
+        val window =
+            windows.firstOrNull {
+                it.id == windowId
+            } ?: return
+        val stored =
+            conversationStore.load(
+                session(window)
+            )
+        if (windowId == activeWindowId) {
+            messages.clear()
+            messages.addAll(stored)
+        } else if (stored.isNotEmpty()) {
+            updateWindow(windowId) {
+                it.copy(unread = true)
+            }
         }
     }
 
