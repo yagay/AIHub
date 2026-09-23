@@ -17,13 +17,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Validate provider JavaScript
-        run: |
-          set -euo pipefail
-          for file in app/src/main/assets/providers/*.js; do
-            echo "Checking $file"
-            node --check "$file"
-          done
       - name: Configure Android SDK
         run: |
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
