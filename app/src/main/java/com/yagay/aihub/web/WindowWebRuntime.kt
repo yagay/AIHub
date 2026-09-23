@@ -206,12 +206,11 @@ class WindowWebRuntime(
     ): WebRuntime.AttachmentAttachResult =
         withContext(Dispatchers.IO) {
             if (uris.isEmpty()) {
-                return@withContext
-                    WebRuntime.AttachmentAttachResult(
-                        0,
-                        emptyList(),
-                        "no-selection",
-                    )
+                return@withContext WebRuntime.AttachmentAttachResult(
+                    0,
+                    emptyList(),
+                    "no-selection",
+                )
             }
 
             uris.forEach { uri ->
