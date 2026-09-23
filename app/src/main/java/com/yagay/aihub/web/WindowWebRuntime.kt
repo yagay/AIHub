@@ -91,7 +91,6 @@ class WindowWebRuntime(
                     name = window.providerId,
                     shortName = window.providerId,
                     homeUrl = "",
-                    scriptAsset = "",
                 ),
                 window,
             ),
