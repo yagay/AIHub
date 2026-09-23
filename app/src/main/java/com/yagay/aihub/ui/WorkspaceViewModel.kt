@@ -51,6 +51,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     private val drafts = mutableStateMapOf<String, String>()
     private val generationJobs = mutableMapOf<String, Job>()
     private val refreshJobs = mutableMapOf<String, Job>()
+    private val syncJobs = mutableMapOf<String, Job>()
 
     init {
         val restored = windowStore.load()
@@ -399,6 +400,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         val target = windows.firstOrNull { it.id == id } ?: return
         generationJobs.remove(id)?.cancel()
         refreshJobs.remove(id)?.cancel()
+        syncJobs.remove(id)?.cancel()
         runtime.destroyWindow(id, ProviderCatalog.byId(target.providerId))
         conversationStore.clear(session(target))
         pendingAttachmentStore.clear(session(target))
@@ -661,6 +663,105 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         } else {
             updateWindow(windowId) { it.copy(unread = true) }
         }
+    }
+
+    fun syncConversation(
+        runtime: WindowWebRuntime,
+        windowId: String = activeWindowId,
+    ) {
+        val target = windows.firstOrNull {
+            it.id == windowId
+        } ?: return
+        val provider =
+            ProviderCatalog.byId(target.providerId)
+
+        if (syncJobs[windowId]?.isActive == true) {
+            return
+        }
+
+        val before =
+            conversationStore.load(
+                session(target)
+            )
+
+        if (
+            windowId == activeWindowId &&
+            before.isEmpty()
+        ) {
+            setStatus(
+                windowId,
+                "正在读取聊天内容…",
+            )
+        }
+
+        syncJobs[windowId] =
+            viewModelScope.launch {
+                try {
+                    runtime.ensureSession(target)
+
+                    val bridgeCount =
+                        runCatching {
+                            runtime.syncConversation(
+                                windowId,
+                                provider,
+                            )
+                        }.onFailure {
+                            DiagnosticLogger.e(
+                                "WORKSPACE",
+                                "bridge_sync_failed provider=" +
+                                    provider.id +
+                                    " window=" +
+                                    windowId.take(12),
+                                it,
+                            )
+                        }.getOrDefault(0)
+
+                    val latest =
+                        conversationStore.load(
+                            session(target)
+                        )
+
+                    if (windowId == activeWindowId) {
+                        messages.clear()
+                        messages.addAll(latest)
+                    } else if (
+                        latest.isNotEmpty() &&
+                        latest != before
+                    ) {
+                        updateWindow(windowId) {
+                            it.copy(unread = true)
+                        }
+                    }
+
+                    if (
+                        latest.isNotEmpty() ||
+                        before.isNotEmpty()
+                    ) {
+                        setStatus(windowId, null)
+                    } else if (
+                        windowId == activeWindowId
+                    ) {
+                        setStatus(
+                            windowId,
+                            "暂未读取到聊天内容。",
+                        )
+                    }
+
+                    DiagnosticLogger.i(
+                        "WORKSPACE",
+                        "bridge_sync_complete provider=" +
+                            provider.id +
+                            " window=" +
+                            windowId.take(12) +
+                            " bridgeCount=" +
+                            bridgeCount +
+                            " stored=" +
+                            latest.size,
+                    )
+                } finally {
+                    syncJobs.remove(windowId)
+                }
+            }
     }
 
     fun refreshChat(
